@@ -30,7 +30,7 @@
 // when using flash storage we use a small line size to make storage
 // compact and minimise the number of erase cycles needed
 #ifdef STORAGE_FLASH_PAGE
-#if defined(STM32H7XX)
+#if defined(STM32H7XX) || defined(STM32U5)
 #define CH_STORAGE_LINE_SHIFT 4
 #else
 #define CH_STORAGE_LINE_SHIFT 3
