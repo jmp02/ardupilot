@@ -182,6 +182,9 @@ static void stm32_gpio_init(void) {
 #elif defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
   rccResetAHB2(STM32_GPIO_EN_MASK);
   rccEnableAHB2(STM32_GPIO_EN_MASK, true);
+#elif defined(STM32U5)
+  rccResetAHB2R1(STM32_GPIO_EN_MASK);
+  rccEnableAHB2R1(STM32_GPIO_EN_MASK, true);
 #else
   rccResetAHB1(STM32_GPIO_EN_MASK);
   rccEnableAHB1(STM32_GPIO_EN_MASK, true);

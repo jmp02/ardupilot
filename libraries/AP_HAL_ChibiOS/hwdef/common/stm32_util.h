@@ -70,7 +70,10 @@ uint32_t get_fattime(void);
 bool check_limit_flash_1M(void);
 
 // one-time programmable area
-#if defined(FLASH_OTP_BASE)
+#if defined(FLASH_OTP_BASE) && defined(FLASH_OTP_SIZE)
+#define OTP_BASE FLASH_OTP_BASE
+#define OTP_SIZE FLASH_OTP_SIZE
+#elif defined(FLASH_OTP_BASE)
 #define OTP_BASE FLASH_OTP_BASE
 #define OTP_SIZE (FLASH_OTP_END-FLASH_OTP_BASE)
 #elif defined(STM32F4)
@@ -105,7 +108,7 @@ void malloc_init(void);
   read mode of a pin. This allows a pin config to be read, changed and
   then written back
  */
-#if defined(STM32F7) || defined(STM32H7) || defined(STM32F4) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) ||defined(STM32L4PLUS)
+#if defined(STM32F7) || defined(STM32H7) || defined(STM32F4) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) ||defined(STM32L4PLUS) || defined(STM32U5)
 iomode_t palReadLineMode(ioline_t line);
 
 enum PalPushPull {

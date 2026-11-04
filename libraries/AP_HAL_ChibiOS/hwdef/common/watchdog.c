@@ -49,6 +49,11 @@
 #define WDG_RESET_CLEAR (1U<<23)
 #define WDG_RESET_IS_IWDG (1U<<29)
 #define WDG_RESET_IS_SFT (1U<<28)
+#elif defined(STM32U5)
+#define WDG_RESET_STATUS (*(__IO uint32_t *)(RCC_BASE + 0xF4))
+#define WDG_RESET_CLEAR (1U<<23)
+#define WDG_RESET_IS_IWDG (1U<<29)
+#define WDG_RESET_IS_SFT (1U<<28)
 #else
 #error "Unsupported IWDG MCU config"
 #endif

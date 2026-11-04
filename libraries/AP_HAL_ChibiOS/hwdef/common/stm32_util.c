@@ -17,7 +17,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#if !defined(STM32U5)
 #include <stm32_dma.h>
+#endif
 #include <hrt.h>
 
 static int64_t utc_time_offset;
@@ -214,12 +216,16 @@ uint32_t get_fattime()
 // get RTC backup registers starting at given idx
 void get_rtc_backup(uint8_t idx, uint32_t *v, uint8_t n)
 {
+#if defined(STM32U5)
+    // the TAMP registers need the RTC APB clock, which is off after reset
+    RCC->APB3ENR |= RCC_APB3ENR_RTCAPBEN;
+#endif
     while (n--) {
 #if defined(STM32F1)
         (void)idx;
         __IO uint32_t *dr = (__IO uint32_t *)&BKP->DR1;
         *v++ = (dr[n/2]&0xFFFF) | (dr[n/2+1]<<16);
-#elif defined(STM32G4)
+#elif defined(STM32G4) || defined(STM32U5)
         *v++ = ((__IO uint32_t *)&TAMP->BKP0R)[idx++];
 #else
         *v++ = ((__IO uint32_t *)&RTC->BKP0R)[idx++];
@@ -230,13 +236,21 @@ void get_rtc_backup(uint8_t idx, uint32_t *v, uint8_t n)
 // set n RTC backup registers starting at given idx
 void set_rtc_backup(uint8_t idx, const uint32_t *v, uint8_t n)
 {
+#if defined(STM32U5)
+    RCC->APB3ENR |= RCC_APB3ENR_RTCAPBEN;
+#endif
 #if !defined(STM32F1)
+#if !defined(STM32U5)
+    // the U5 backup registers are in TAMP, which needs no RTC kernel clock
     if ((RCC->BDCR & RCC_BDCR_RTCEN) == 0) {
         RCC->BDCR |= STM32_RTCSEL;
         RCC->BDCR |= RCC_BDCR_RTCEN;
     }
+#endif
 #ifdef PWR_CR_DBP
     PWR->CR |= PWR_CR_DBP;
+#elif defined(PWR_DBPR_DBP)
+    PWR->DBPR |= PWR_DBPR_DBP;
 #else
     PWR->CR1 |= PWR_CR1_DBP;
 #endif
@@ -247,7 +261,7 @@ void set_rtc_backup(uint8_t idx, const uint32_t *v, uint8_t n)
         __IO uint32_t *dr = (__IO uint32_t *)&BKP->DR1;
         dr[n/2] =   (*v) & 0xFFFF;
         dr[n/2+1] = (*v) >> 16;
-#elif defined(STM32G4)
+#elif defined(STM32G4) || defined(STM32U5)
         ((__IO uint32_t *)&TAMP->BKP0R)[idx++] = *v++;
 #else
         ((__IO uint32_t *)&RTC->BKP0R)[idx++] = *v++;
@@ -350,7 +364,7 @@ void peripheral_power_enable(void)
 #endif
 }
 
-#if defined(STM32F7) || defined(STM32H7) || defined(STM32F4) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
+#if defined(STM32F7) || defined(STM32H7) || defined(STM32F4) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS) || defined(STM32U5)
 /*
   read mode of a pin. This allows a pin config to be read, changed and
   then written back
