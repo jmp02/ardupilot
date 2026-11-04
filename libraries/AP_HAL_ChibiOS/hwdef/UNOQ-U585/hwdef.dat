@@ -21,7 +21,19 @@ define AP_NOTIFY_GPIO_LED_RGB_RED_PIN 90
 define AP_NOTIFY_GPIO_LED_RGB_GREEN_PIN 91
 define AP_NOTIFY_GPIO_LED_RGB_BLUE_PIN 92
 
-# no sensors yet. Bring-up only, not for upstream: the mock IMU (AP_InertialSensor_NONE) stands in
+# I2C2 on the header's SDA/SCL pins (D20 = PB11, D21 = PB10): the bench breakout (Adafruit 4517, LSM6DSOX +
+# LIS3MDL, pull-ups on the breakout), later the shield's baros and compass
+I2C_ORDER I2C2
+PB10 I2C2_SCL I2C2
+PB11 I2C2_SDA I2C2
+define HAL_I2C_INTERNAL_MASK 1
+# interrupt-driven, no DMA until ArduPilot has a GPDMA backend
+NODMA I2C*
+
+# bench compass: LIS3MDL at 0x1C (ADM open)
+COMPASS LIS3MDL I2C:0:0x1C false ROTATION_NONE
+
+# no IMU yet. Bring-up only, not for upstream: the mock IMU (AP_InertialSensor_NONE) stands in
 # until a real IMU works (M5), so Copter reaches its main loop
 define AP_INERTIALSENSOR_NONE_ENABLED 1
 define HAL_BARO_ALLOW_INIT_NO_BARO
