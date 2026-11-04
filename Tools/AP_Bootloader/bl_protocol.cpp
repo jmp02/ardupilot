@@ -230,6 +230,15 @@ do_jump(uint32_t stacktop, uint32_t entrypoint)
 
     chSysLock();
 
+#if defined(__ARM_ARCH_8M_MAIN__)
+    // ARMv8-M checks the stack pointers against MSPLIM/PSPLIM, which
+    // still hold our own stack limits. The app's stack top is usually
+    // below them, so the first push after the switch would fault
+    // (STKOF). The app's startup code sets its own limits
+    __set_PSPLIM(0);
+    __set_MSPLIM(0);
+#endif
+
     // we set sp as well as msp to avoid an issue with loading NuttX
     asm volatile(
         "mov sp, %0	\n"
