@@ -653,6 +653,10 @@ class uploader(object):
                     struct.pack("I", baud) +
                     uploader.EOC)
         self.__getSync()
+        # the bootloader changes its baudrate 5ms after this reply. On a
+        # native UART (no USB adapter latency) a sync sent right after
+        # the switch arrives at the old baudrate and is lost
+        time.sleep(0.02)
 
     def erase_extflash(self, label, size):
         if runningPython3:
