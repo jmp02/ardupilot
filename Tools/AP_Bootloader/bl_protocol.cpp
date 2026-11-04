@@ -228,7 +228,7 @@ do_jump(uint32_t stacktop, uint32_t entrypoint)
     SCB_DisableICache();
 #endif
 
-    chSysLock();    
+    chSysLock();
 
     // we set sp as well as msp to avoid an issue with loading NuttX
     asm volatile(
@@ -323,6 +323,9 @@ jump_to_app()
     rccDisableAPB1R1(~0);
     rccDisableAPB1R2(~0);
 #elif defined(STM32L4PLUS)
+    rccDisableAPB1R1(~0);
+    rccDisableAPB1R2(~0);
+#elif defined(STM32U5)
     rccDisableAPB1R1(~0);
     rccDisableAPB1R2(~0);
 #else
