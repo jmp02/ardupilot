@@ -33,10 +33,12 @@ NODMA I2C*
 # 400kHz: the IMU's FIFO needs it (AP_InertialSensor_ASM330 on I2C: 1.67kHz gyro + 833Hz accel)
 define HAL_I2C_MAX_CLOCK 400000
 
-# bench IMU: LSM6DSOX at 0x6A (ADAG open), driven by the ASM330 backend
-IMU ASM330 I2C:0:0x6A ROTATION_NONE
+# bench IMU: LSM6DSOX at 0x6A (ADAG open), driven by the ASM330 backend. Breakout flat, chips up, forward = the
+# X arrow printed on it: the chip's Z points up, so roll 180
+IMU ASM330 I2C:0:0x6A ROTATION_ROLL_180
 
-# bench compass: LIS3MDL at 0x1C (ADM open)
+# bench compass: LIS3MDL at 0x1C (ADM open). Its axes are the IMU's with Y and Z flipped (Adafruit places it rotated;
+# found from the field in two poses), which is already the body frame
 COMPASS LIS3MDL I2C:0:0x1C false ROTATION_NONE
 
 # no baro on the bench breakout
