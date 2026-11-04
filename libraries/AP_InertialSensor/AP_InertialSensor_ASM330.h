@@ -47,6 +47,7 @@ private:
     void accel_init();
 
     uint16_t get_count_fifo_unread_data();
+    void read_fifo(uint16_t words);
 
     void poll_data();
 
@@ -59,9 +60,26 @@ private:
 
     AP_HAL::OwnPtr<AP_HAL::Device> dev;
 
-    // Angular rate sensitivity @ 2000dps is 70.0 mdps/LSB from ASM330LHH DataSheet.
+    // ASM330 or LSM6DSO, from WHO_AM_I
+    DevTypes devtype;
+
+    // sample rates and their CTRL1_XL/CTRL2_G ODR and FIFO_CTRL3 BDR codes, chosen by bus type
+    uint16_t gyro_rate_hz;
+    uint16_t accel_rate_hz;
+    uint8_t odr_g;
+    uint8_t odr_xl;
+    uint8_t bdr;
+    uint32_t poll_period_us;
+
+    // FIFO words read in one burst: the FIFO output address rolls over from 0x7E to 0x78
+    static constexpr uint8_t FIFO_WORD_SIZE = 7;
+    static constexpr uint8_t FIFO_BURST_WORDS = 16;
+    static constexpr uint8_t FIFO_MAX_DRAIN_WORDS = 64;
+    uint8_t fifo_buf[FIFO_BURST_WORDS * FIFO_WORD_SIZE];
+
+    // Angular rate sensitivity @ 2000dps is 70.0 mdps/LSB from ASM330LHH DataSheet (LSM6DSO/DSOX: the same).
     static constexpr float gyro_scale = (70.0f / 1000.0f) * DEG_TO_RAD;
-    // Linear acceleration sensitivity @ 16g is 0.488 mG/LSB from ASM330LHH DataSheet.
+    // Linear acceleration sensitivity @ 16g is 0.488 mG/LSB from ASM330LHH DataSheet (LSM6DSO/DSOX: the same).
     static constexpr float accel_scale = (0.488 / 1000.0f) * GRAVITY_MSS;
 
     enum Rotation rot;

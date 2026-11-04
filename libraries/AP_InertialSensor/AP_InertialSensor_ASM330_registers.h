@@ -3,6 +3,7 @@
 
 // WHOAMI values
 #define WHO_AM_I    0x6B
+#define WHO_AM_I_LSM6DSO    0x6C
 
 // ODR
 #define ODR_POWER_DOWN  (0x0 << 4)
@@ -90,7 +91,7 @@
 #   define ASM330_REG_CTRL1_XL_ODR_XL_208Hz                 ODR_208Hz
 #   define ASM330_REG_CTRL1_XL_ODR_XL_416Hz                 ODR_416Hz
 #   define ASM330_REG_CTRL1_XL_ODR_XL_833Hz                 ODR_833Hz
-#   define ASM330_REG_CTRL1_XL_ODR_XL_1667Hz                ODR_1667Hz
+#   define ASM330_REG_CTRL1_XL_ODR_XL_1667Hz                ODR_1666Hz
 #   define ASM330_REG_CTRL1_XL_ODR_XL_3333Hz                ODR_3333Hz
 #   define ASM330_REG_CTRL1_XL_ODR_XL_6667Hz                ODR_6667Hz
 // FS1_XL/FS2_XL
@@ -112,7 +113,7 @@
 #   define ASM330_REG_CTRL2_G_ODR_G_208Hz                   ODR_208Hz
 #   define ASM330_REG_CTRL2_G_ODR_G_416Hz                   ODR_416Hz
 #   define ASM330_REG_CTRL2_G_ODR_G_833Hz                   ODR_833Hz
-#   define ASM330_REG_CTRL2_G_ODR_G_1667Hz                  ODR_1667Hz
+#   define ASM330_REG_CTRL2_G_ODR_G_1667Hz                  ODR_1666Hz
 #   define ASM330_REG_CTRL2_G_ODR_G_3333Hz                  ODR_3333Hz
 #   define ASM330_REG_CTRL2_G_ODR_G_6667Hz                  ODR_6667Hz
 // FS1_G/FS2_G & FS_125
