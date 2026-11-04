@@ -26,6 +26,10 @@ define AP_NOTIFY_GPIO_LED_RGB_BLUE_PIN 92
 define AP_INERTIALSENSOR_NONE_ENABLED 1
 define HAL_BARO_ALLOW_INIT_NO_BARO
 
+# keep SWD enabled after boot (BRD_OPTIONS bit 3, DEBUG_ENABLE): on the UNO Q the SWD lines are board traces to the QRB2210,
+# not exposed pads, and its SWD is the only debug and recovery path
+define HAL_BRD_OPTIONS_DEFAULT (BOARD_OPTION_WATCHDOG | BOARD_OPTION_DEBUG_ENABLE)
+
 # no ADC: the U5 port's ADCv7 driver only supports the U3
 define HAL_USE_ADC FALSE
 
