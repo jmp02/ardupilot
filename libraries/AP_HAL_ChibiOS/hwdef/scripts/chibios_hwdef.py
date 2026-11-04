@@ -1869,6 +1869,8 @@ INCLUDE common.ld
         need_uart_driver = False
         OTG2_index = None
         devlist = []
+        # without UART DMA the SerialDef entries have no DMA fields
+        uart_nodma = any(line.split()[:2] == ['define', 'HAL_UART_NODMA'] for line in self.alllines)
         have_rts_cts = False
         have_low_noise = False
         # check if we have a UART with a low noise RX pin
@@ -1884,6 +1886,8 @@ INCLUDE common.ld
                 n = int(dev[4:])
             elif dev.startswith('USART'):
                 n = int(dev[5:])
+            elif dev.startswith('LPUART'):
+                n = int(dev[6:])
             elif dev.startswith('OTG'):
                 n = int(dev[3:])
             elif dev.startswith('EMPTY'):
@@ -1921,10 +1925,11 @@ INCLUDE common.ld
                     f.write('}\n')
             else:
                 need_uart_driver = True
+                sd_name = ('LPSD%u' if dev.startswith('LPUART') else 'SD%u') % n
                 f.write(
-                    "#define HAL_%s_CONFIG { (BaseSequentialStream*) &SD%u, %u, false, "
-                    % (dev, n, n))
-                if self.mcu_series.startswith("STM32F1"):
+                    "#define HAL_%s_CONFIG { (BaseSequentialStream*) &%s, %u, false, "
+                    % (dev, sd_name, n))
+                if self.mcu_series.startswith("STM32F1") or uart_nodma:
                     f.write("%s, %s, %s, %s, " % (tx_line, rx_line, rts_line, cts_line))
                 else:
                     f.write("STM32_%s_RX_DMA_CONFIG, STM32_%s_TX_DMA_CONFIG, %s, %s, %s, %s, " %
