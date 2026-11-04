@@ -91,6 +91,15 @@ I2CBus I2CDeviceManager::businfo[ARRAY_SIZE(I2CD)];
 #define HAL_I2C_G4_400_TIMINGR 0x20501E65
 #endif
 
+// I2C kernel clock = PCLK1 = 160MHz. 100kHz: PRESC 15 (100ns), SCLL 5.0us, SCLH 4.0us,
+// SDADEL 0.5us, SCLDEL 1.3us. 400kHz: PRESC 7 (50ns), SCLL 1.5us, SCLH 0.7us, SDADEL 250ns, SCLDEL 500ns
+#ifndef HAL_I2C_U5_100_TIMINGR
+#define HAL_I2C_U5_100_TIMINGR 0xF0C52731
+#endif
+#ifndef HAL_I2C_U5_400_TIMINGR
+#define HAL_I2C_U5_400_TIMINGR 0x70950D1D
+#endif
+
 /*
   enable clear (toggling SCL) on I2C bus timeouts which leave SDA stuck low
  */
@@ -102,9 +111,11 @@ I2CBus I2CDeviceManager::businfo[ARRAY_SIZE(I2CD)];
 void I2CBus::dma_init(void)
 {
     chMtxObjectInit(&dma_lock);
+#if AP_HAL_SHARED_DMA_ENABLED
     dma_handle = NEW_NOTHROW Shared_DMA(I2CD[busnum].dma_channel_tx, I2CD[busnum].dma_channel_rx,
                                 FUNCTOR_BIND_MEMBER(&I2CBus::dma_allocate, void, Shared_DMA *),
                                 FUNCTOR_BIND_MEMBER(&I2CBus::dma_deallocate, void, Shared_DMA *));
+#endif
 }
 
 // Clear Bus to avoid bus lockup
@@ -248,6 +259,14 @@ I2CDeviceManager::I2CDeviceManager(void)
             businfo[i].i2ccfg.timingr = HAL_I2C_G4_400_TIMINGR;
             businfo[i].busclock = 400000;
         }
+#elif defined(STM32U5)
+        if (businfo[i].busclock <= 100000) {
+            businfo[i].i2ccfg.timingr = HAL_I2C_U5_100_TIMINGR;
+            businfo[i].busclock = 100000;
+        } else {
+            businfo[i].i2ccfg.timingr = HAL_I2C_U5_400_TIMINGR;
+            businfo[i].busclock = 400000;
+        }
 #else // F1 or F4
         businfo[i].i2ccfg.op_mode = OPMODE_I2C;
         businfo[i].i2ccfg.clock_speed = businfo[i].busclock;
@@ -272,7 +291,12 @@ I2CDevice::I2CDevice(uint8_t busnum, uint8_t address, uint32_t bus_clock, bool u
     asprintf(&pname, "I2C:%u:%02x",
              (unsigned)busnum, (unsigned)address);
     if (bus_clock < bus.busclock) {
-#if defined(STM32F7) || defined(STM32H7) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
+#if defined(STM32U5)
+        if (bus_clock <= 100000) {
+            bus.i2ccfg.timingr = HAL_I2C_U5_100_TIMINGR;
+            bus.busclock = 100000;
+        }
+#elif defined(STM32F7) || defined(STM32H7) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
         if (bus_clock <= 100000) {
             bus.i2ccfg.timingr = HAL_I2C_F7_100_TIMINGR;
             bus.busclock = 100000;
@@ -319,7 +343,7 @@ bool I2CDevice::transfer(const uint8_t *send, uint32_t send_len,
         return false;
     }
 
-#if defined(STM32F7) || defined(STM32H7) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
+#if defined(STM32F7) || defined(STM32H7) || defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS) || defined(STM32U5)
     if (_use_smbus) {
         bus.i2ccfg.cr1 |= I2C_CR1_SMBHEN;
     } else {
@@ -378,7 +402,9 @@ bool I2CDevice::_transfer(const uint8_t *send, uint32_t send_len,
         // we get the lock and start the bus inside the retry loop to
         // allow us to give up the DMA channel to an SPI device on
         // retries
+#if AP_HAL_SHARED_DMA_ENABLED
         bus.dma_handle->lock();
+#endif
 
         i2cStart(I2CD[bus.busnum].i2c, &bus.i2ccfg);
         osalDbgAssert(I2CD[bus.busnum].i2c->state == I2C_READY, "i2cStart state");
@@ -397,7 +423,9 @@ bool I2CDevice::_transfer(const uint8_t *send, uint32_t send_len,
         i2cSoftStop(I2CD[bus.busnum].i2c);
         osalDbgAssert(I2CD[bus.busnum].i2c->state == I2C_STOP, "i2cStart state");
 
+#if AP_HAL_SHARED_DMA_ENABLED
         bus.dma_handle->unlock();
+#endif
 
         if (I2CD[bus.busnum].i2c->errors & I2C_ISR_LIMIT) {
             INTERNAL_ERROR(AP_InternalError::error_t::i2c_isr);
