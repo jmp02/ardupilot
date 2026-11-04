@@ -342,13 +342,13 @@ uint16_t AP_InertialSensor_ASM330::get_count_fifo_unread_data()
     return (status[0] | (status[1] << 8)) & 0x03FF;
 }
 
-void AP_InertialSensor_ASM330::read_fifo(uint16_t words)
+bool AP_InertialSensor_ASM330::read_fifo(uint16_t words)
 {
     if (!dev->read_registers(ASM330_REG_FIFO_DATA_OUT_TAG, fifo_buf, words * FIFO_WORD_SIZE)) {
         DEV_PRINTF("ASM330: error reading fifo data\n");
         _inc_gyro_error_count(gyro_instance);
         _inc_accel_error_count(accel_instance);
-        return;
+        return false;
     }
 
     for (uint16_t i = 0; i < words; i++) {
@@ -373,6 +373,7 @@ void AP_InertialSensor_ASM330::read_fifo(uint16_t words)
             break;
         }
     }
+    return true;
 }
 
 /**
@@ -384,7 +385,9 @@ void AP_InertialSensor_ASM330::poll_data()
     uint16_t samples = MIN(get_count_fifo_unread_data(), uint16_t(FIFO_MAX_DRAIN_WORDS));
     while (samples > 0) {
         const uint16_t n = MIN(samples, uint16_t(FIFO_BURST_WORDS));
-        read_fifo(n);
+        if (!read_fifo(n)) {
+            break;
+        }
         samples -= n;
     }
 

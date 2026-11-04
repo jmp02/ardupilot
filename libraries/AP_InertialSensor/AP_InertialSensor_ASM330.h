@@ -47,7 +47,7 @@ private:
     void accel_init();
 
     uint16_t get_count_fifo_unread_data();
-    void read_fifo(uint16_t words);
+    bool read_fifo(uint16_t words);
 
     void poll_data();
 
