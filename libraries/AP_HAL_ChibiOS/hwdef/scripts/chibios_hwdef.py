@@ -708,6 +708,7 @@ class ChibiOSHWDef(hwdef.HWDef):
             'STM32C0xx/',
             'STM32U0xx/',
             'STM32U3xx/',
+            'STM32U5xx/',
             'STM32H5xx/',
             'STM32L4xx+/',
         )
@@ -2061,7 +2062,7 @@ INCLUDE common.ld
             sda_line = self.make_line('I2C%u_SDA' % n)
             scl_line = self.make_line('I2C%u_SCL' % n)
             if uses_i2cv4:
-                # I2Cv4 (STM32G0/G4/C0/U0/U3/H5/L4+) uses a single DMA
+                # I2Cv4 (STM32G0/G4/C0/U0/U3/U5/H5/L4+) uses a single DMA
                 # channel for both TX and RX on each I2C peripheral
                 f.write('''
 #if defined(STM32_I2C_I2C%u_DMA_CHANNEL)
