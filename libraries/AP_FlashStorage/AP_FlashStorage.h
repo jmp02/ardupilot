@@ -44,7 +44,7 @@
  */
 #define AP_FLASHSTORAGE_TYPE_F1  1 // F1 and F3
 #define AP_FLASHSTORAGE_TYPE_F4  2 // F4 and F7
-#define AP_FLASHSTORAGE_TYPE_H7  3 // H7
+#define AP_FLASHSTORAGE_TYPE_H7  3 // H7 and U5
 #define AP_FLASHSTORAGE_TYPE_G4  4 // G4
 
 #ifndef AP_FLASHSTORAGE_TYPE
@@ -54,9 +54,10 @@
   unless all bits in the 16 bit word are 1
  */
 #define AP_FLASHSTORAGE_TYPE AP_FLASHSTORAGE_TYPE_F1
-#elif defined(STM32H7)
+#elif defined(STM32H7) || defined(STM32U5)
 /*
-  STM32H7 can only write in 32 byte chunks, and must only write when all bits are 1
+  STM32H7 can only write in 32 byte chunks, and must only write when all bits are 1.
+  STM32U5 writes 16 byte quad-words once per erase (ECC), so 32 byte chunks work there too
  */
 #define AP_FLASHSTORAGE_TYPE AP_FLASHSTORAGE_TYPE_H7
 #elif defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
