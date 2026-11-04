@@ -145,6 +145,15 @@ static const uint32_t flash_memmap[STM32_FLASH_NPAGES] = { KB(32), KB(32), KB(32
 #elif defined(STM32L4PLUS)
 #define STM32_FLASH_NPAGES (BOARD_FLASH_SIZE/4)
 #define STM32_FLASH_FIXED_PAGE_SIZE 4 
+#elif defined(STM32U5)
+// 8k pages in two banks of half the flash each (always dual bank on
+// 2M parts; DUALBANK=1 on the smaller ones)
+#define STM32_FLASH_NPAGES (BOARD_FLASH_SIZE/8)
+#define STM32_FLASH_FIXED_PAGE_SIZE 8
+#define STM32_FLASH_NBANKS 2
+#define STM32U5_FLASH_PAGES_PER_BANK (STM32_FLASH_NPAGES/2)
+#define STM32U5_FLASH_ERRORS (FLASH_NSSR_OPERR | FLASH_NSSR_PROGERR | FLASH_NSSR_WRPERR | \
+                              FLASH_NSSR_PGAERR | FLASH_NSSR_SIZERR | FLASH_NSSR_PGSERR)
 #elif defined(STM32L4)
 #define STM32_FLASH_NPAGES (BOARD_FLASH_SIZE/2)
 #define STM32_FLASH_FIXED_PAGE_SIZE 2
@@ -231,6 +240,10 @@ static void stm32_flash_wait_idle(void)
             ) {
         // nop
     }
+#elif defined(STM32U5)
+    while (FLASH->NSSR & (FLASH_NSSR_BSY | FLASH_NSSR_WDW)) {
+        // nop
+    }
 #else
 	while (FLASH->SR & FLASH_SR_BSY) {
         // nop
@@ -247,6 +260,8 @@ static void stm32_flash_clear_errors(void)
 #endif
 #elif defined (STM32L4PLUS)
     FLASH->SR = 0x0000C3FBU;
+#elif defined(STM32U5)
+    FLASH->NSSR = FLASH_NSSR_EOP | STM32U5_FLASH_ERRORS | FLASH_NSSR_OPTWERR;
 #else
     FLASH->SR = 0xF3;
 #endif
@@ -272,6 +287,12 @@ static void stm32_flash_unlock(void)
         FLASH->KEYR2 = FLASH_KEY2;
     }
 #endif
+#elif defined(STM32U5)
+    if (FLASH->NSCR & FLASH_NSCR_LOCK) {
+        /* Unlock sequence */
+        FLASH->NSKEYR = FLASH_KEY1;
+        FLASH->NSKEYR = FLASH_KEY2;
+    }
 #else
     if (FLASH->CR & FLASH_CR_LOCK) {
         /* Unlock sequence */
@@ -305,6 +326,9 @@ void stm32_flash_lock(void)
 #if STM32_FLASH_NBANKS > 1
     FLASH->CR2 |= FLASH_CR_LOCK;
 #endif
+#elif defined(STM32U5)
+    stm32_flash_wait_idle();
+    FLASH->NSCR |= FLASH_NSCR_LOCK;
 #else
     stm32_flash_wait_idle();
     FLASH->CR |= FLASH_CR_LOCK;
@@ -513,6 +537,35 @@ void stm32_flash_corrupt(uint32_t addr, bool double_bit)
 }
 #endif // STM32H7
 
+#if defined(STM32U5)
+/*
+  physical bank of a page. BKER selects the physical bank, while
+  SWAP_BANK swaps the banks in the address map
+ */
+static uint32_t stm32u5_flash_bank(uint32_t page)
+{
+    uint32_t bank = page / STM32U5_FLASH_PAGES_PER_BANK;
+    if (FLASH->OPTR & FLASH_OPTR_SWAP_BANK) {
+        bank ^= 1U;
+    }
+    return bank;
+}
+
+/*
+  the ICACHE caches all reads of the flash on the C-bus and is not
+  coherent with erase and program operations
+ */
+static void stm32u5_icache_invalidate(void)
+{
+    if (ICACHE->CR & ICACHE_CR_EN) {
+        ICACHE->CR |= ICACHE_CR_CACHEINV;
+        while (ICACHE->SR & ICACHE_SR_BUSYF) {
+            // nop
+        }
+    }
+}
+#endif // STM32U5
+
 /*
   erase a page
  */
@@ -605,6 +658,14 @@ bool stm32_flash_erasepage(uint32_t page)
     FLASH->CR = FLASH_CR_PER;
     FLASH->CR |= page<<FLASH_CR_PNB_Pos;
     FLASH->CR |= FLASH_CR_STRT;
+#elif defined(STM32U5)
+    FLASH->NSCR = FLASH_NSCR_PER |
+                  ((page % STM32U5_FLASH_PAGES_PER_BANK) << FLASH_NSCR_PNB_Pos) |
+                  (stm32u5_flash_bank(page) << FLASH_NSCR_BKER_Pos);
+    FLASH->NSCR |= FLASH_NSCR_STRT;
+    stm32_flash_wait_idle();
+    FLASH->NSCR &= ~(FLASH_NSCR_PER | FLASH_NSCR_PNB | FLASH_NSCR_BKER);
+    stm32u5_icache_invalidate();
 #else
 #error "Unsupported MCU"
 #endif
@@ -969,6 +1030,85 @@ failed:
 }
 #endif // STM32G4
 
+#if defined(STM32U5)
+/*
+  the U5 programs 128 bit quad-words, each of them once per erase
+  (with ECC). Writes must be 16 byte aligned and a multiple of 16
+  bytes long. Quad-words that already hold the data are skipped, so
+  rewriting identical data (or 0xFF padding over erased flash) works
+ */
+static bool stm32_flash_write_u5(uint32_t addr, const void *buf, uint32_t count)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+
+    if ((count & 0xF) || (addr & 0xF)) {
+        _flash_fail_line = __LINE__;
+        return false;
+    }
+
+    if ((addr+count) > STM32_FLASH_BASE+STM32_FLASH_SIZE) {
+        _flash_fail_line = __LINE__;
+        return false;
+    }
+
+    stm32_flash_unlock();
+    bool success = true;
+
+    while (count >= 16) {
+        if (memcmp((const void *)addr, b, 16) != 0) {
+            // a quad-word can only be written once after an erase
+            for (uint8_t i=0; i<4; i++) {
+                if (getreg32(addr + i*4) != 0xFFFFFFFF) {
+                    _flash_fail_line = __LINE__;
+                    _flash_fail_addr = addr;
+                    success = false;
+                    goto failed;
+                }
+            }
+
+            uint32_t v[4];
+            memcpy(v, b, sizeof(v));
+
+#if STM32_FLASH_DISABLE_ISR
+            syssts_t sts = chSysGetStatusAndLockX();
+#endif
+            stm32_flash_wait_idle();
+            stm32_flash_clear_errors();
+            FLASH->NSCR |= FLASH_NSCR_PG;
+            for (uint8_t i=0; i<4; i++) {
+                putreg32(v[i], addr + i*4);
+            }
+            __DSB();
+            stm32_flash_wait_idle();
+            const uint32_t sr = FLASH->NSSR;
+            FLASH->NSCR &= ~FLASH_NSCR_PG;
+            stm32_flash_clear_errors();
+            stm32u5_icache_invalidate();
+#if STM32_FLASH_DISABLE_ISR
+            chSysRestoreStatusX(sts);
+#endif
+
+            if ((sr & STM32U5_FLASH_ERRORS) || memcmp((const void *)addr, b, 16) != 0) {
+                _flash_fail_line = __LINE__;
+                _flash_fail_addr = addr;
+                _flash_fail_count = count;
+                _flash_fail_buf = (uint8_t *)b;
+                success = false;
+                goto failed;
+            }
+        }
+
+        addr += 16;
+        count -= 16;
+        b += 16;
+    }
+
+failed:
+    stm32_flash_lock();
+    return success;
+}
+#endif // STM32U5
+
 bool stm32_flash_write(uint32_t addr, const void *buf, uint32_t count)
 {
 #if defined(STM32F1) || defined(STM32F3)
@@ -979,6 +1119,8 @@ bool stm32_flash_write(uint32_t addr, const void *buf, uint32_t count)
     return stm32_flash_write_h7(addr, buf, count);
 #elif defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS) 
     return stm32_flash_write_g4(addr, buf, count);
+#elif defined(STM32U5)
+    return stm32_flash_write_u5(addr, buf, count);
 #else
 #error "Unsupported MCU"
 #endif
