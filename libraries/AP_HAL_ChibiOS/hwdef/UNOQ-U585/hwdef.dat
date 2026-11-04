@@ -1,0 +1,33 @@
+# hw definition file for processing by chibios_hwdef.py
+# Arduino UNO Q (ABX00162): firmware for its STM32U585. Bring-up configuration: MAVLink to
+# the QRB2210 on SERIAL0, no sensors, no outputs, no DMA
+
+include hwdef.inc
+
+# app after the bootloader's 4 x 8k pages
+FLASH_RESERVE_START_KB 32
+
+# parameters in the last 4 x 8k pages (end of bank 2), used as two 16k sectors
+STORAGE_FLASH_PAGE 252
+define AP_FLASH_STORAGE_DOUBLE_PAGE 1
+define HAL_STORAGE_SIZE 15360
+
+# LED3 (RGB, active low)
+PH10 LED_RED OUTPUT HIGH GPIO(90)
+PH11 LED_GREEN OUTPUT HIGH GPIO(91)
+PH12 LED_BLUE OUTPUT HIGH GPIO(92)
+define AP_NOTIFY_GPIO_LED_RGB_ENABLED 1
+define AP_NOTIFY_GPIO_LED_RGB_RED_PIN 90
+define AP_NOTIFY_GPIO_LED_RGB_GREEN_PIN 91
+define AP_NOTIFY_GPIO_LED_RGB_BLUE_PIN 92
+
+# no sensors yet: boot to the main loop without an IMU or baro
+define AP_INERTIALSENSOR_ALLOW_NO_SENSORS 1
+define HAL_BARO_ALLOW_INIT_NO_BARO
+
+# no ADC: the U5 port's ADCv7 driver only supports the U3
+define HAL_USE_ADC FALSE
+
+# no CrashCatcher (its fault handler is ARMv7-M assembly) and no GyroFFT (no CMSIS-DSP library for the M33)
+define AP_CRASHDUMP_ENABLED 0
+define HAL_GYROFFT_ENABLED 0
