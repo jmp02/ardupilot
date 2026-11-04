@@ -37,9 +37,9 @@ define HAL_I2C_MAX_CLOCK 400000
 # X arrow printed on it: the chip's Z points up, so roll 180
 IMU ASM330 I2C:0:0x6A ROTATION_ROLL_180
 
-# bench compass: LIS3MDL at 0x1C (ADM open). Its axes are the IMU's with Y and Z flipped (Adafruit places it rotated;
-# found from the field in two poses), which is already the body frame
-COMPASS LIS3MDL I2C:0:0x1C false ROTATION_NONE
+# bench compass: LIS3MDL at 0x1C (ADM open). Its axes are the IMU's (ArduPilot's compass calibration:
+# "internal bad orientation: 8", ROLL_180, with ROTATION_NONE)
+COMPASS LIS3MDL I2C:0:0x1C false ROTATION_ROLL_180
 
 # no baro on the bench breakout
 define HAL_BARO_ALLOW_INIT_NO_BARO
