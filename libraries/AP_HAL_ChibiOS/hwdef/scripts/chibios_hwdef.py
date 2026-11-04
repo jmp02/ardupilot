@@ -30,7 +30,7 @@ class ChibiOSHWDef(hwdef.HWDef):
     # output variables for each pin
     f4f7_vtypes = ['MODER', 'OTYPER', 'OSPEEDR', 'PUPDR', 'ODR', 'AFRL', 'AFRH']
     f1_vtypes = ['CRL', 'CRH', 'ODR']
-    af_labels = ['USART', 'UART', 'SPI', 'I2C', 'SDIO', 'SDMMC', 'OTG', 'JT', 'TIM', 'CAN', 'QUADSPI', 'OCTOSPI', 'ETH', 'MCO']
+    af_labels = ['USART', 'UART', 'LPUART', 'SPI', 'I2C', 'SDIO', 'SDMMC', 'OTG', 'JT', 'TIM', 'CAN', 'QUADSPI', 'OCTOSPI', 'ETH', 'MCO']
     # for the callers which only want to know whether a label names an
     # alternative function, not which one:
     af_label_prefixes = tuple(af_labels)
@@ -38,7 +38,7 @@ class ChibiOSHWDef(hwdef.HWDef):
     # the pin types a pin line may take; checked for every pin line, so
     # compiled once here rather than per-call:
     VALID_PIN_TYPE_RE = re.compile(
-        r'INPUT|OUTPUT|TIM\d+|USART\d+|UART\d+|ADC\d+|'
+        r'INPUT|OUTPUT|TIM\d+|USART\d+|UART\d+|LPUART\d+|ADC\d+|'
         r'SPI\d+|OTG\d+|SWD|CAN\d?|I2C\d+|CS|'
         r'SDMMC\d+|SDIO|QUADSPI\d|OCTOSPI\d|ETH\d|RCC'
     )
@@ -197,7 +197,7 @@ class ChibiOSHWDef(hwdef.HWDef):
             return None
 
         if function and (function.endswith("_RTS") or function.endswith("_CTS_GPIO")) and (
-                function.startswith('USART') or function.startswith('UART')):
+                function.startswith(('USART', 'UART', 'LPUART'))):
             # we do software RTS and can do either software CTS or hardware CTS
             return None
 
@@ -293,7 +293,7 @@ class ChibiOSHWDef(hwdef.HWDef):
                 self.f1_pin_setup(mcu_type)
 
             # check that labels and pin types are consistent
-            for prefix in ['USART', 'UART', 'TIM']:
+            for prefix in ['USART', 'UART', 'LPUART', 'TIM']:
                 if label is None or type is None:
                     continue
                 if type.startswith(prefix):
@@ -348,7 +348,7 @@ class ChibiOSHWDef(hwdef.HWDef):
         def is_RTS(self):
             '''return true if this is a RTS pin'''
             if self.label and self.label.endswith("_RTS") and (
-                    self.type.startswith('USART') or self.type.startswith('UART')):
+                    self.type.startswith(('USART', 'UART', 'LPUART'))):
                 return True
             return False
 
@@ -421,16 +421,14 @@ class ChibiOSHWDef(hwdef.HWDef):
             if self.is_CS():
                 v = "PULLUP"
             # generate pullups for UARTs
-            if (self.type.startswith('USART') or
-                self.type.startswith('UART')) and (
+            if self.type.startswith(('USART', 'UART', 'LPUART')) and (
                 (self.label.endswith('_TX') or
                  self.label.endswith('_RX') or
                  self.label.endswith('_CTS'))):
                 v = "PULLUP"
 
             # pulldown on RTS to prevent radios from staying in bootloader
-            if (self.type.startswith('USART') or
-                self.type.startswith('UART')) and (
+            if self.type.startswith(('USART', 'UART', 'LPUART')) and (
                  self.label.endswith('_RTS')):
                 v = "PULLDOWN"
 
@@ -849,6 +847,9 @@ class ChibiOSHWDef(hwdef.HWDef):
             return [128] * (self.get_config('FLASH_SIZE_KB', type=int)//128)
         elif mcu_series.startswith('STM32F100') or mcu_series.startswith('STM32F103'):
             return [1] * self.get_config('FLASH_SIZE_KB', type=int)
+        elif mcu_series.startswith('STM32U5'):
+            # 8k pages, two banks
+            return [8] * (self.get_config('FLASH_SIZE_KB', type=int)//8)
         elif mcu_series.startswith('STM32L4') and self.mcu_type.startswith('STM32L4R'):
             # STM32L4PLUS
             return [4] * (self.get_config('FLASH_SIZE_KB', type=int)//4)
@@ -2009,6 +2010,9 @@ INCLUDE common.ld
                 OTG2_index = serial_list.index(s)
             elif s.startswith('OTG'):
                 devlist.append('(BaseChannel *)&SDU1')
+            elif s.startswith('LPUART'):
+                devlist.append('(BaseChannel *)&LPSD%u' % int(s[-1]))
+                have_serial = True
             else:
                 snum = int(s[-1])
                 devlist.append('(BaseChannel *)&SD%u' % snum)
@@ -2529,7 +2533,7 @@ Please run: Tools/scripts/build_bootloaders.py %s
         '''write peripheral enable lines'''
         f.write('// peripherals enabled\n')
         for type in sorted(list(self.bytype.keys()) + list(self.alttype.keys())):
-            if type.startswith('USART') or type.startswith('UART'):
+            if type.startswith(('USART', 'UART', 'LPUART')):
                 dstr = 'STM32_SERIAL_USE_%-6s' % type
                 f.write('#ifndef %s\n' % dstr)
                 f.write('#define %s TRUE\n' % dstr)
