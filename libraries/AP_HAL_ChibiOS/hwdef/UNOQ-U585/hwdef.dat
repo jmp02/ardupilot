@@ -10,7 +10,9 @@ FLASH_RESERVE_START_KB 32
 # parameters in the last 4 x 8k pages (end of bank 2), used as two 16k sectors
 STORAGE_FLASH_PAGE 252
 define AP_FLASH_STORAGE_DOUBLE_PAGE 1
-define HAL_STORAGE_SIZE 15360
+# 8k, not 15360: AP_FlashStorage's H7 format (32 bytes per 30) keeps room for a full rewrite in each sector,
+# 15360 needs 16414 bytes and a 16k sector cannot hold that, so every write switched sectors (erase every 30s)
+define HAL_STORAGE_SIZE 8192
 
 # LED3 (RGB, active low)
 PH10 LED_RED OUTPUT HIGH GPIO(90)
