@@ -60,6 +60,5 @@ define HAL_BRD_OPTIONS_DEFAULT (BOARD_OPTION_WATCHDOG | BOARD_OPTION_DEBUG_ENABL
 # no ADC: the U5 port's ADCv7 driver only supports the U3
 define HAL_USE_ADC FALSE
 
-# no CrashCatcher (its fault handler is ARMv7-M assembly) and no GyroFFT (no CMSIS-DSP library for the M33)
+# no CrashCatcher (its fault handler is ARMv7-M assembly)
 define AP_CRASHDUMP_ENABLED 0
-define HAL_GYROFFT_ENABLED 0
