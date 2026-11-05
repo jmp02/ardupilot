@@ -37,6 +37,15 @@ define HAL_I2C_MAX_CLOCK 400000
 # X arrow printed on it: the chip's Z points up, so roll 180
 IMU ASM330 I2C:0:0x6A ROTATION_ROLL_180
 
+# SPI2 on the header (D13 SCK = PB13, D12 MISO = PB14, D11 MOSI = PB15), CS on D10 = PB9: the SPI LSM6DSV16X breakout
+# (docs/hardware/shield-sensors.md "Buy now"), probed at boot; absent until it is wired, then found with no change here
+PB13 SPI2_SCK SPI2
+PB14 SPI2_MISO SPI2
+PB15 SPI2_MOSI SPI2
+PB9 IMU2_CS CS
+SPIDEV lsm6dsv SPI2 DEVID1 IMU2_CS MODE3 2*MHZ 8*MHZ
+IMU LSM6DSV SPI:lsm6dsv ROTATION_NONE
+
 # bench compass: LIS3MDL at 0x1C (ADM open). Its axes are the IMU's (ArduPilot's compass calibration:
 # "internal bad orientation: 8", ROLL_180, with ROTATION_NONE)
 COMPASS LIS3MDL I2C:0:0x1C false ROTATION_ROLL_180
