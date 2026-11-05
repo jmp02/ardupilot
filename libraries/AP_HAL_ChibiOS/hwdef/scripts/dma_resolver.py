@@ -344,6 +344,17 @@ def write_dma3_header(f, peripheral_list, dma_exclude=[], quiet=False):
         f.write("#define STM32_SPI_%s_RX_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
         f.write("#define STM32_SPI_%s_TX_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
         f.write("#define STM32_SPI_%s_DMA_STREAMS STM32_DMA_STREAM_ID_ANY, STM32_DMA_STREAM_ID_ANY\n" % key)
+
+    # RCOutput's timer DMA (DShot, serial LEDs): one channel per timer from
+    # the 2D-capable ones, the TIMx_UP request line set with each transfer
+    tims = sorted(p for p in peripheral_list
+                  if p.startswith('TIM') and p.endswith('_UP') and p not in dma_exclude)
+    if tims:
+        f.write("\n\n// generated timer DMA configuration lines\n")
+        f.write("#define STM32_RCOUT_DMA3_CHANNELS (STM32_DMA31_MASK_FIFO4_2D | STM32_DMA32_MASK_FIFO4_2D)\n")
+        for key in tims:
+            f.write("#define STM32_TIM_%s_DMA_STREAM STM32_DMA_STREAM_ID_ANY\n" % key)
+            f.write("#define STM32_TIM_%s_DMA_CHAN STM32_DMA3_REQ_%sD\n" % (key, key))
     return [], []
 
 
