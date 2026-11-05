@@ -177,6 +177,11 @@
 #endif
 #define STM32_SPI_DMA_ERROR_HOOK(spip)      STM32_DMA_ERROR_HOOK(spip)
 
+// ArduPilot's own DMA users (UARTDriver) allocate GPDMA channels through the ChibiOS DMA3 driver
+#if defined(STM32_DMA_REQUIRED) && !defined(STM32_DMA3_REQUIRED)
+#define STM32_DMA3_REQUIRED
+#endif
+
 #define STM32_ST_IRQ_PRIORITY               8
 #ifndef STM32_ST_USE_TIMER
 #define STM32_ST_USE_TIMER                  2
