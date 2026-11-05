@@ -30,8 +30,7 @@ mcu = {
     'DEFINES' : {
         'STM32U5' : '1',
         'HAL_WITH_MCU_MONITORING' : '1',
-        # RCOutput's timer DMA has no GPDMA backend yet: plain PWM only
-        'HAL_DSHOT_ENABLED' : '0',
+        # ESC passthrough (BLHeli) on GPDMA is untested: needs an ESC
         'HAL_SERIAL_ESC_COMM_ENABLED' : '0',
     },
 
