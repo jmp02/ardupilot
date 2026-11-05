@@ -155,6 +155,20 @@ SECTIONS
         __data_end__ = .;
     } > DATA_RAM AT > flash
 
+    /* GPDMA (ChibiOS DMA3) linked-list items. CxLBAR holds their upper 16 address bits, so they must stay
+       inside one 64k page. Empty on MCUs with classic DMA */
+    .dma3 (NOLOAD) : ALIGN(4)
+    {
+        __dma3_base__ = .;
+        *(.dma3)
+        *(.dma3.*)
+        *(.bss.__dma3_*)
+        . = ALIGN(4);
+        __dma3_end__ = .;
+    } > BSS_RAM
+    ASSERT(__dma3_end__ == __dma3_base__ || (__dma3_base__ >> 16) == ((__dma3_end__ - 1) >> 16),
+           "GPDMA linked-list items cross a 64k page")
+
     .bss (NOLOAD) : ALIGN(4)
     {
         . = ALIGN(4);
