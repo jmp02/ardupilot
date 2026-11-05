@@ -29,8 +29,6 @@ I2C_ORDER I2C2
 PB10 I2C2_SCL I2C2
 PB11 I2C2_SDA I2C2
 define HAL_I2C_INTERNAL_MASK 1
-# interrupt-driven, no DMA until ArduPilot has a GPDMA backend
-NODMA I2C*
 
 # 400kHz: the IMU's FIFO needs it (AP_InertialSensor_ASM330 on I2C: 1.67kHz gyro + 833Hz accel)
 define HAL_I2C_MAX_CLOCK 400000
