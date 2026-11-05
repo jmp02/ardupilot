@@ -263,7 +263,7 @@ void Shared_DMA::dma_info(ExpandingString &str)
             && _contention_stats[i].transactions == 0) {
             continue;
         }
-#if STM32_DMA_ADVANCED
+#if defined(STM32_DMA_ADVANCED) && STM32_DMA_ADVANCED
 #define STREAM_MUX 8
 #define STREAM_OFFSET 0
 #else

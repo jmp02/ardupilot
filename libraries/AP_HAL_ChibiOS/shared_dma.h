@@ -23,6 +23,12 @@
 // DMA stream ID for stream_id2 when only one is needed
 #define SHARED_DMA_NONE 255
 
+#if defined(STM32_DMA3_PRESENT) && !defined(STM32_DMA_STREAM_ID_ANY)
+// GPDMA (DMA3) channels are allocated by their drivers from a channel mask,
+// like the classic DMA's "any stream": nothing to lock
+#define STM32_DMA_STREAM_ID_ANY SHARED_DMA_MAX_STREAM_ID
+#endif
+
 #if AP_HAL_SHARED_DMA_ENABLED
 
 class ChibiOS::Shared_DMA
