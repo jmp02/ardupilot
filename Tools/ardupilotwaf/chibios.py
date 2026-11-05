@@ -796,6 +796,9 @@ def build(bld):
     DSP_LIBS = {
         'cortex-m4' : 'libarm_cortexM4lf_math.a',
         'cortex-m7' : 'libarm_cortexM7lfdp_math.a',
+        # ARMv8-M Mainline with the DSP extension and FPv5-SP runs ARMv7E-M
+        # + FPv4-SP code, so the M4 library serves the M33 (STM32U5)
+        'cortex-m33' : 'libarm_cortexM4lf_math.a',
     }
     if bld.env.CORTEX in DSP_LIBS:
         libname = DSP_LIBS[bld.env.CORTEX]
