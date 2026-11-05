@@ -38,6 +38,23 @@ typedef uint32_t dmar_uint_t;
 typedef int32_t dmar_int_t;
 #endif
 
+/*
+  timer DMA (DShot, serial LEDs, ESC passthrough) is written for the
+  classic DMA streams. MCUs with only GPDMA (STM32_DMA3_PRESENT) get
+  plain PWM output without it
+ */
+#ifndef AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
+#if defined(STM32_DMA3_PRESENT)
+#define AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED 0
+#else
+#define AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED 1
+#endif
+#endif
+
+#if !AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED && (HAL_DSHOT_ENABLED || HAL_SERIALLED_ENABLED || HAL_SERIAL_ESC_COMM_ENABLED || defined(HAL_WITH_BIDIR_DSHOT))
+#error "DShot, serial LEDs and ESC passthrough need RCOutput timer DMA"
+#endif
+
 #ifdef AP_RCOUT_USE_32BIT_TIME
 typedef uint32_t rcout_timer_t;
 #define rcout_micros() AP_HAL::micros()
@@ -368,7 +385,9 @@ private:
         uint32_t ch_mask;
         // mask of channels that are enabled and active
         uint32_t en_mask;
+#if AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
         const stm32_dma_stream_t *dma;
+#endif
 #if AP_HAL_SHARED_DMA_ENABLED
         Shared_DMA *dma_handle;
 #endif

@@ -1603,7 +1603,7 @@ __RAMFUNC__ void RCOutput::dshot_send_next_group(void* p)
 /*
   allocate DMA channel
  */
-#if AP_HAL_SHARED_DMA_ENABLED
+#if AP_HAL_SHARED_DMA_ENABLED && AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
 void RCOutput::dma_allocate(Shared_DMA *ctx)
 {
     for (auto &group : pwm_group_list) {
@@ -1649,7 +1649,7 @@ void RCOutput::dma_deallocate(Shared_DMA *ctx)
         }
     }
 }
-#endif // AP_HAL_SHARED_DMA_ENABLED
+#endif // AP_HAL_SHARED_DMA_ENABLED && AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
 
 /*
   create a DSHOT 16 bit packet. Based on prepareDshotPacket from betaflight
@@ -1946,7 +1946,7 @@ __RAMFUNC__ void RCOutput::dma_unlock(virtual_timer_t* vt, void *p)
     chSysUnlockFromISR();
 }
 
-#ifndef HAL_WITH_BIDIR_DSHOT
+#if !defined(HAL_WITH_BIDIR_DSHOT) && AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
 /*
   DMA interrupt handler. Used to mark DMA completed for DShot
  */
@@ -1978,6 +1978,7 @@ __RAMFUNC__ void RCOutput::dma_up_irq_callback(void *p, uint32_t flags)
  */
 void RCOutput::dma_cancel(pwm_group& group)
 {
+#if AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
     if (group.dma == nullptr) {
         return;
     }
@@ -2008,6 +2009,7 @@ void RCOutput::dma_cancel(pwm_group& group)
     group.dshot_state = DshotState::IDLE;
     group.dshot_waiter = nullptr;
     chSysUnlock();
+#endif // AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
 }
 
 /*
