@@ -72,6 +72,20 @@ extern AP_IOMCU iomcu;
 
 #define TELEM_IC_SAMPLE 16
 
+#if defined(STM32_DMA3_PRESENT) && AP_HAL_CHIBIOS_RCOUT_DMA_ENABLED
+#ifndef STM32_RCOUT_DMA3_CHANNELS
+#define STM32_RCOUT_DMA3_CHANNELS STM32_DMA3_MASK_ANY
+#endif
+/*
+  GPDMA (DMA3) setup for the DMAR burst: one word per TIMx_UP request,
+  as the timer issues one request per CCR of the burst
+ */
+#define RCOUT_DMA3_CR (STM32_DMA3_CCR_PRIO(3) | STM32_DMA3_CCR_LAP_MEM | STM32_DMA3_CCR_TCIE | \
+                       STM32_DMA3_CCR_DTEIE | STM32_DMA3_CCR_USEIE)
+#define RCOUT_DMA3_TR1 (STM32_DMA3_CTR1_SAP_MEM | STM32_DMA3_CTR1_SDW_WORD | STM32_DMA3_CTR1_SINC | \
+                        STM32_DMA3_CTR1_DAP_PER | STM32_DMA3_CTR1_DDW_WORD)
+#endif
+
 struct RCOutput::pwm_group RCOutput::pwm_group_list[] = { HAL_PWM_GROUPS };
 #if HAL_SERIAL_ESC_COMM_ENABLED
 struct RCOutput::irq_state RCOutput::irq;
@@ -977,7 +991,11 @@ bool RCOutput::setup_group_DMA(pwm_group &group, uint32_t bitrate, uint32_t bit_
     if (group.dma == nullptr) {
         // we don't do dma sharing in non advanced mode
         chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+        group.dma = dma3ChannelAllocI(STM32_RCOUT_DMA3_CHANNELS, 10, dma_up_irq_callback, &group);
+#else
         group.dma = dmaStreamAllocI(group.dma_up_stream_id, 10, dma_up_irq_callback, &group);
+#endif
         chSysUnlock();
         if (group.dma == nullptr) {
             print_group_setup_error(group, "failed to allocate DMA");
@@ -1609,7 +1627,12 @@ void RCOutput::dma_allocate(Shared_DMA *ctx)
     for (auto &group : pwm_group_list) {
         if (group.dma_handle == ctx && group.dma == nullptr) {
             chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+            // any free channel: the request line is set with each transfer
+            group.dma = dma3ChannelAllocI(STM32_RCOUT_DMA3_CHANNELS, 10, dma_up_irq_callback, &group);
+#else
             group.dma = dmaStreamAllocI(group.dma_up_stream_id, 10, dma_up_irq_callback, &group);
+#endif
 #if defined(STM32F1)
             if (group.pwm_started && group.dma_handle->is_shared()) {
                 /* Timer configured and started.*/
@@ -1617,7 +1640,7 @@ void RCOutput::dma_allocate(Shared_DMA *ctx)
                 group.pwm_drv->tim->DIER  = group.pwm_drv->config->dier & ~STM32_TIM_DIER_IRQ_MASK;
             }
 #endif
-#if STM32_DMA_SUPPORTS_DMAMUX
+#if !defined(STM32_DMA3_PRESENT) && STM32_DMA_SUPPORTS_DMAMUX
             if (group.dma) {
                 dmaSetRequestSource(group.dma, group.dma_up_channel);
             }
@@ -1635,7 +1658,11 @@ void RCOutput::dma_deallocate(Shared_DMA *ctx)
     for (auto &group : pwm_group_list) {
         if (group.dma_handle == ctx && group.dma != nullptr) {
             chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+            dma3ChannelFreeI(group.dma);
+#else
             dmaStreamFreeI(group.dma);
+#endif
 #if defined(STM32F1)
             // leaving the peripheral running on IOMCU plays havoc with the UART that is
             // also sharing this channel, we only turn it off rather than resetting so
@@ -1885,6 +1912,12 @@ void RCOutput::send_pulses_DMAR(pwm_group &group, uint32_t buffer_length)
     TOGGLE_PIN_DEBUG(54);
 #endif
 
+#if defined(STM32_DMA3_PRESENT)
+    stm32_cacheBufferFlush(group.dma_buffer, (buffer_length+31)&~31);
+    dma3ChannelSetupTransfer(group.dma, RCOUT_DMA3_CR, RCOUT_DMA3_TR1,
+                             STM32_DMA3_CTR2_REQSEL(group.dma_up_channel) | STM32_DMA3_CTR2_DREQ,
+                             buffer_length, group.dma_buffer, &(group.pwm_drv->tim->DMAR), 0U);
+#else
 #if STM32_DMA_SUPPORTS_DMAMUX
     dmaSetRequestSource(group.dma, group.dma_up_channel);
 #endif
@@ -1913,17 +1946,28 @@ void RCOutput::send_pulses_DMAR(pwm_group &group, uint32_t buffer_length)
 #endif
                      STM32_DMA_CR_MINC | STM32_DMA_CR_PL(3) |
                      STM32_DMA_CR_TEIE | STM32_DMA_CR_TCIE);
+#endif // STM32_DMA3_PRESENT
 
     // setup for burst strided transfers into the timers 4 CCR registers
     const uint8_t ccr_ofs = offsetof(stm32_tim_t, CCR)/4;
     // burst address (BA) of the CCR register, burst length (BL) of 4 (0b11)
+#if defined(TIM_DCR_DBSS_0)
+    // timers with a burst source selection (U5) also need the update request named
+    // as the burst's trigger (DBSS 0001); its reset value 0000 is reserved
+    group.pwm_drv->tim->DCR = STM32_TIM_DCR_DBA(ccr_ofs) | STM32_TIM_DCR_DBL(3) | TIM_DCR_DBSS_0;
+#else
     group.pwm_drv->tim->DCR = STM32_TIM_DCR_DBA(ccr_ofs) | STM32_TIM_DCR_DBL(3);
+#endif
     group.dshot_state = DshotState::SEND_START;
 #ifdef HAL_GPIO_LINE_GPIO54
     TOGGLE_PIN_DEBUG(54);
 #endif
 
+#if defined(STM32_DMA3_PRESENT)
+    dma3ChannelEnable(group.dma);
+#else
     dmaStreamEnable(group.dma);
+#endif
     // record when the transaction was started
     group.last_dmar_send_us = rcout_micros();
 #endif // HAL_DSHOT_ENABLED
@@ -1954,7 +1998,12 @@ __RAMFUNC__ void RCOutput::dma_up_irq_callback(void *p, uint32_t flags)
 {
     pwm_group *group = (pwm_group *)p;
     chSysLockFromISR();
+#if defined(STM32_DMA3_PRESENT)
+    // the block is complete: the channel is idle, this resets it and clears its flags
+    (void)dma3ChannelDisable(group->dma);
+#else
     dmaStreamDisable(group->dma);
+#endif
 #if HAL_SERIAL_ESC_COMM_ENABLED
     if (soft_serial_waiting()) {
         if (group->in_serial_dma) {
@@ -1984,7 +2033,11 @@ void RCOutput::dma_cancel(pwm_group& group)
     }
 
     chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+    (void)dma3ChannelDisable(group.dma);
+#else
     dmaStreamDisable(group.dma);
+#endif
 #ifdef HAL_WITH_BIDIR_DSHOT
     if (group.ic_dma_enabled() && !group.has_shared_ic_up_dma()) {
         dmaStreamDisable(group.bdshot.ic_dma[group.bdshot.curr_telem_chan]);
