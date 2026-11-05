@@ -154,6 +154,15 @@ extern "C" {
 #define PORT_INT_REQUIRED_STACK 128
 #endif
 
+/*
+  the idle thread's own stack: the ARMv7-M port's default. The ARMv8-M-ML
+  port (STM32U5) defaults to 16, which leaves the idle thread with less
+  than 64 bytes free once an interrupt stacks an FPU frame on it
+ */
+#ifndef PORT_IDLE_THREAD_STACK_SIZE
+#define PORT_IDLE_THREAD_STACK_SIZE 64
+#endif
+
 /**
  * @brief   Kernel hardening level.
  * @details This option is the level of functional-safety checks enabled
