@@ -205,8 +205,13 @@ private:
     uint32_t _rts_threshold;
     HAL_Semaphore _write_mutex;
 #ifndef HAL_UART_NODMA
+#if defined(STM32_DMA3_PRESENT)
+    const stm32_dma3_channel_t* rxdma;
+    const stm32_dma3_channel_t* txdma;
+#else
     const stm32_dma_stream_t* rxdma;
     const stm32_dma_stream_t* txdma;
+#endif
 #endif
     HAL_Semaphore tx_sem;
     HAL_Semaphore rx_sem;

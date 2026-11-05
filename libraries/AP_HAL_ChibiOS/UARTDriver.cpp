@@ -115,6 +115,42 @@ static const eventmask_t EVT_TRANSMIT_UNBUFFERED = EVENT_MASK(3);
 #define CONTENTION_BAUD_THRESHOLD 115200
 #endif
 
+#if !defined(HAL_UART_NODMA) && defined(STM32_DMA3_PRESENT)
+#ifndef STM32_UART_DMA3_CHANNELS
+#define STM32_UART_DMA3_CHANNELS STM32_DMA3_MASK_ANY
+#endif
+
+/*
+  GPDMA (DMA3) setup for one block between a UART data register and a bounce
+  buffer. There is no mode word: the direction comes from the source and
+  destination ports and from which side issues the request
+ */
+#define UART_DMA3_CR (STM32_DMA3_CCR_PRIO(0) | STM32_DMA3_CCR_LAP_MEM | STM32_DMA3_CCR_TCIE | \
+                      STM32_DMA3_CCR_DTEIE | STM32_DMA3_CCR_USEIE)
+#define UART_DMA3_TR1_RX (STM32_DMA3_CTR1_SAP_PER | STM32_DMA3_CTR1_SDW_BYTE | \
+                          STM32_DMA3_CTR1_DAP_MEM | STM32_DMA3_CTR1_DDW_BYTE | STM32_DMA3_CTR1_DINC)
+#define UART_DMA3_TR1_TX (STM32_DMA3_CTR1_SAP_MEM | STM32_DMA3_CTR1_SDW_BYTE | STM32_DMA3_CTR1_SINC | \
+                          STM32_DMA3_CTR1_DAP_PER | STM32_DMA3_CTR1_DDW_BYTE)
+
+/*
+  stop a GPDMA channel and return how many bytes of its block did not reach
+  the destination. Suspending finishes the transfer in progress, but bytes
+  already read from the source can still sit in the channel's FIFO, and the
+  reset discards them (RM0456, GPDMA_CxSR.FIFOL): those are in fifo_bytes
+ */
+static inline uint32_t dma3_stop(const stm32_dma3_channel_t *dmachp, uint32_t &fifo_bytes)
+{
+    dma3ChannelSuspend(dmachp);
+    dma3ChannelWaitIdle(dmachp);
+    fifo_bytes = (dmachp->channel->CSR & STM32_DMA3_CSR_FIFOL_MASK) >> STM32_DMA3_CSR_FIFOL_POS;
+    const uint32_t remaining = dma3ChannelGetTransactionSize(dmachp) + fifo_bytes;
+    dma3ChannelReset(dmachp);
+    dmachp->channel->CCR = 0U;
+    dmachp->channel->CFCR = STM32_DMA3_CFCR_ALL_FLAGS;
+    return remaining;
+}
+#endif // STM32_DMA3_PRESENT
+
 UARTDriver::UARTDriver(uint8_t _serial_num) :
 sdef(_serial_tab[_serial_num]),
 serial_num(_serial_num),
@@ -420,6 +456,18 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
                 if (rx_dma_enabled) {
                     osalDbgAssert(rxdma == nullptr, "double DMA allocation");
                     chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+                    // the request line and RDR are set up with each transfer
+                    rxdma = dma3ChannelAllocI(STM32_UART_DMA3_CHANNELS,
+                                              12,  //IRQ Priority
+                                              (stm32_dma3isr_t)rxbuff_full_irq,
+                                              (void *)this);
+                    chSysUnlock();
+                    if (rxdma == nullptr) {
+                        // no free GPDMA channel: interrupt-driven RX
+                        rx_dma_enabled = false;
+                    }
+#else
                     rxdma = dmaStreamAllocI(sdef.dma_rx_stream_id,
                                             12,  //IRQ Priority
                                             (stm32_dmaisr_t)rxbuff_full_irq,
@@ -434,6 +482,7 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
 #if STM32_DMA_SUPPORTS_DMAMUX
                     dmaSetRequestSource(rxdma, sdef.dma_rx_channel_id);
 #endif
+#endif // STM32_DMA3_PRESENT
                 }
                 _device_initialised = true;
             }
@@ -500,7 +549,9 @@ void UARTDriver::_begin(uint32_t b, uint16_t rxS, uint16_t txS)
                 ((SerialDriver*)sdef.serial)->usart->CR1 &= ~USART_CR1_RXNEIE;
                 // Start DMA
                 if (!was_initialised) {
+#if !defined(STM32_DMA3_PRESENT)
                     dmaStreamDisable(rxdma);
+#endif
                     dma_rx_enable();
                 }
             }
@@ -548,6 +599,15 @@ void UARTDriver::dma_tx_allocate(Shared_DMA *ctx)
         return;
     }
     chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+    // the request line and TDR are set up with each transfer. Without a free
+    // channel txdma stays null and write_pending_bytes_DMA() falls back
+    txdma = dma3ChannelAllocI(STM32_UART_DMA3_CHANNELS,
+                              12,  //IRQ Priority
+                              (stm32_dma3isr_t)tx_complete,
+                              (void *)this);
+    chSysUnlock();
+#else
     txdma = dmaStreamAllocI(sdef.dma_tx_stream_id,
                             12,  //IRQ Priority
                             (stm32_dmaisr_t)tx_complete,
@@ -562,12 +622,24 @@ void UARTDriver::dma_tx_allocate(Shared_DMA *ctx)
 #if STM32_DMA_SUPPORTS_DMAMUX
     dmaSetRequestSource(txdma, sdef.dma_tx_channel_id);
 #endif
+#endif // STM32_DMA3_PRESENT
 #endif // HAL_USE_SERIAL
 }
 
 #ifndef HAL_UART_NODMA
 void UARTDriver::dma_rx_enable(void)
 {
+#if defined(STM32_DMA3_PRESENT)
+#if HAL_USE_SERIAL == TRUE
+    rx_bounce_idx ^= 1;
+    dma3ChannelSetupTransfer(rxdma, UART_DMA3_CR, UART_DMA3_TR1_RX,
+                             STM32_DMA3_CTR2_REQSEL(sdef.dma_rx_channel_id),
+                             RX_BOUNCE_BUFSIZE,
+                             &((SerialDriver*)sdef.serial)->usart->RDR,
+                             rx_bounce_buf[rx_bounce_idx], 0U);
+    dma3ChannelEnable(rxdma);
+#endif
+#else
     uint32_t dmamode = STM32_DMA_CR_DMEIE | STM32_DMA_CR_TEIE;
     dmamode |= STM32_DMA_CR_CHSEL(sdef.dma_rx_channel_id);
     dmamode |= STM32_DMA_CR_PL(0);
@@ -581,13 +653,20 @@ void UARTDriver::dma_rx_enable(void)
     dmaStreamSetMode(rxdma, dmamode | STM32_DMA_CR_DIR_P2M |
                      STM32_DMA_CR_MINC | STM32_DMA_CR_TCIE);
     dmaStreamEnable(rxdma);
+#endif // STM32_DMA3_PRESENT
 }
 #endif
 
 void UARTDriver::dma_tx_deallocate(Shared_DMA *ctx)
 {
     chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+    if (txdma != nullptr) {
+        dma3ChannelFreeI(txdma);
+    }
+#else
     dmaStreamFreeI(txdma);
+#endif
     txdma = nullptr;
     chSysUnlock();
 }
@@ -600,7 +679,12 @@ void UARTDriver::rx_irq_cb(void* self)
     if (!uart_drv->rx_dma_enabled) {
         return;
     }
-#if defined(STM32F7) || defined(STM32H7)
+#if defined(STM32_DMA3_PRESENT)
+    // stopping a GPDMA channel raises no transfer complete interrupt, so the
+    // data is handed over from here. The UART and DMA interrupts share
+    // priority 12 and cannot preempt each other
+    rxbuff_full_irq(self, 0);
+#elif defined(STM32F7) || defined(STM32H7)
     //disable dma, triggering DMA transfer complete interrupt
     uart_drv->rxdma->stream->CR &= ~STM32_DMA_CR_EN;
 #elif defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
@@ -630,14 +714,23 @@ __RAMFUNC__ void UARTDriver::rxbuff_full_irq(void* self, uint32_t flags)
     if (!uart_drv->rx_dma_enabled) {
         return;
     }
+#if defined(STM32_DMA3_PRESENT)
+    uint32_t fifo_bytes;
+    uint16_t len = RX_BOUNCE_BUFSIZE - dma3_stop(uart_drv->rxdma, fifo_bytes);
+    // bytes still in the channel's FIFO are lost with the restart
+    uart_drv->_rx_stats_dropped_bytes += fifo_bytes;
+#else
     uint16_t len = RX_BOUNCE_BUFSIZE - dmaStreamGetTransactionSize(uart_drv->rxdma);
+#endif
     const uint8_t bounce_idx = uart_drv->rx_bounce_idx;
 
     // restart the DMA transfers immediately. This switches to the
     // other bounce buffer. We restart the DMA before we copy the data
     // out to minimise the time with DMA disabled, which allows us to
     // handle much higher receiver baudrates
+#if !defined(STM32_DMA3_PRESENT)
     dmaStreamDisable(uart_drv->rxdma);
+#endif
     uart_drv->dma_rx_enable();
     
     if (len > 0) {
@@ -850,11 +943,20 @@ __RAMFUNC__ void UARTDriver::tx_complete(void* self, uint32_t flags)
     chSysLockFromISR();
 
     // check nothing bad happened
+#if defined(STM32_DMA3_PRESENT)
+    if ((flags & STM32_DMA3_CSR_ERRORS) != 0) {
+        INTERNAL_ERROR(AP_InternalError::error_t::dma_fail);
+    }
+
+    uint32_t fifo_bytes;
+    (void)dma3_stop(uart_drv->txdma, fifo_bytes);
+#else
     if ((flags & STM32_DMA_ISR_TEIF) != 0) {
         INTERNAL_ERROR(AP_InternalError::error_t::dma_fail);
     }
 
     dmaStreamDisable(uart_drv->txdma);
+#endif
     uart_drv->_last_write_completed_us = AP_HAL::micros();
 
     chEvtSignalI(uart_drv->uart_thread_ctx, EVT_TRANSMIT_DMA_COMPLETE);
@@ -899,6 +1001,15 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
 
         dma_handle->lock(); // we have our own thread so grab the lock
 
+#if defined(STM32_DMA3_PRESENT)
+        if (txdma == nullptr) {
+            // no free GPDMA channel: interrupt-driven TX from now on
+            tx_dma_enabled = false;
+            dma_handle->unlock(false);
+            break;
+        }
+#endif
+
         chEvtGetAndClearEvents(EVT_TRANSMIT_DMA_COMPLETE);
 
         if (dma_handle->has_contention()) {
@@ -930,6 +1041,14 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
         }
 
         chSysLock();
+#if defined(STM32_DMA3_PRESENT)
+        // the channel was stopped by tx_complete() or the timeout below
+        dma3ChannelSetupTransfer(txdma, UART_DMA3_CR, UART_DMA3_TR1_TX,
+                                 STM32_DMA3_CTR2_REQSEL(sdef.dma_tx_channel_id) | STM32_DMA3_CTR2_DREQ,
+                                 tx_len, tx_bounce_buf,
+                                 &((SerialDriver*)sdef.serial)->usart->TDR, 0U);
+        dma3ChannelEnable(txdma);
+#else
         dmaStreamDisable(txdma);
         stm32_cacheBufferFlush(tx_bounce_buf, tx_len);
         dmaStreamSetMemory0(txdma, tx_bounce_buf);
@@ -943,6 +1062,7 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
         dmaStreamSetMode(txdma, dmamode | STM32_DMA_CR_DIR_M2P |
                         STM32_DMA_CR_MINC | STM32_DMA_CR_TCIE);
         dmaStreamEnable(txdma);
+#endif // STM32_DMA3_PRESENT
         uint32_t timeout_us = ((1000000UL * (tx_len+2) * 10) / _baudrate) + 500;
         // prevent very long timeouts at low baudrates which could cause another thread
         // using begin() to block
@@ -956,9 +1076,14 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
             chSysLock();
             // check whether DMA completion happened in the intervening time
             // first disable the stream to prevent further interrupts
+#if defined(STM32_DMA3_PRESENT)
+            uint32_t fifo_bytes;
+            const uint32_t tx_size = dma3_stop(txdma, fifo_bytes);
+#else
             dmaStreamDisable(txdma);
 
             const uint32_t tx_size = dmaStreamGetTransactionSize(txdma);
+#endif
 
             if (tx_size >= tx_len) {
                 // we didn't write any of our bytes
@@ -1176,13 +1301,20 @@ void UARTDriver::_rx_timer_tick(void)
         //Check if DMA is enabled
         //if not, it might be because the DMA interrupt was silenced
         //let's handle that here so that we can continue receiving
-#if defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
+#if defined(STM32_DMA3_PRESENT)
+        bool enabled = (rxdma->channel->CCR & STM32_DMA3_CCR_EN);
+#elif defined(STM32F3) || defined(STM32G4) || defined(STM32L4) || defined(STM32L4PLUS)
         bool enabled = (rxdma->channel->CCR & STM32_DMA_CR_EN);
 #else
         bool enabled = (rxdma->stream->CR & STM32_DMA_CR_EN);
 #endif
         if (!enabled) {
+#if defined(STM32_DMA3_PRESENT)
+            uint32_t fifo_bytes;
+            uint8_t len = RX_BOUNCE_BUFSIZE - dma3_stop(rxdma, fifo_bytes);
+#else
             uint8_t len = RX_BOUNCE_BUFSIZE - dmaStreamGetTransactionSize(rxdma);
+#endif
             if (len != 0) {
                 const uint32_t written = _readbuf.write(rx_bounce_buf[rx_bounce_idx], len);
                 _rx_stats_bytes += len;
@@ -1195,7 +1327,9 @@ void UARTDriver::_rx_timer_tick(void)
             }
             // DMA disabled by idle interrupt never got a chance to be handled
             // we will enable it here
+#if !defined(STM32_DMA3_PRESENT)
             dmaStreamDisable(rxdma);
+#endif
             dma_rx_enable();
         }
         chSysUnlock();
@@ -1731,7 +1865,12 @@ bool UARTDriver::set_options(uint16_t options)
         }
 #ifndef HAL_UART_NODMA
         if (rx_dma_enabled && rxdma) {
+#if defined(STM32_DMA3_PRESENT)
+            uint32_t fifo_bytes;
+            (void)dma3_stop(rxdma, fifo_bytes);
+#else
             dmaStreamDisable(rxdma);
+#endif
         }
 #endif
         // force DMA off when using half-duplex as the timing may affect other devices
