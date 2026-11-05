@@ -57,8 +57,9 @@ define HAL_BARO_ALLOW_INIT_NO_BARO
 # not exposed pads, and its SWD is the only debug and recovery path
 define HAL_BRD_OPTIONS_DEFAULT (BOARD_OPTION_WATCHDOG | BOARD_OPTION_DEBUG_ENABLE)
 
-# no ADC: the U5 port's ADCv7 driver only supports the U3
-define HAL_USE_ADC FALSE
+# A0 = PA4 (ADC1_IN9) as the battery voltage input; nothing on it on the bench. BATT_MONITOR stays 0 (default)
+PA4 BATT_VOLTAGE_SENS ADC1 SCALE(1)
+define HAL_BATT_VOLT_PIN 9
+# no divider on the bench
+define HAL_BATT_VOLT_SCALE 1.0
 
-# no CrashCatcher (its fault handler is ARMv7-M assembly)
-define AP_CRASHDUMP_ENABLED 0
