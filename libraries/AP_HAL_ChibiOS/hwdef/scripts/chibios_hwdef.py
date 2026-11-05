@@ -2342,7 +2342,14 @@ INCLUDE common.ld
         # If MCU monitoring is enabled add pins (from H7 reference manual)
         defines = self.get_mcu_config('DEFINES', False)
         mcu_monitoring = defines and defines.get('HAL_WITH_MCU_MONITORING') == '1'
-        if mcu_monitoring:
+        if mcu_monitoring and self.mcu_series.startswith('STM32U5'):
+            # U5: ADC1's internal channels (VREFINT 0, VSENSE 19, checked
+            # against the factory calibration), in ADC1's group
+            adc_chans[0].append((19, 253, "1", "U5 Internal VSENSE", ""))
+            analogset.add(253)
+            adc_chans[0].append((0, 254, "1", "U5 Internal VREFINT", ""))
+            analogset.add(254)
+        elif mcu_monitoring:
             # VBAT4
             adc_chans[2].append((17, 252, "1", "H7 Internal VBAT4", ""))
             analogset.add(252)

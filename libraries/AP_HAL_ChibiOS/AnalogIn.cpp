@@ -363,6 +363,13 @@ float AnalogIn::get_pin_scaling(uint8_t adc_index, uint8_t pin_index)
  */
 #if HAL_WITH_MCU_MONITORING
 static uint16_t min_vrefint, max_vrefint;
+#if defined(STM32U5)
+// the internal channels share ADC1's group with the pins: their positions
+// in it, found by analog pin number (the generator's, as on H7) in setup_adc()
+#define ANALOG_VSENSE_PIN 253
+#define ANALOG_VREFINT_PIN 254
+static uint8_t mcu_vsense_index, mcu_vrefint_index;
+#endif
 #endif
 void AnalogIn::adccallback(ADCDriver *adcp)
 {
@@ -385,7 +392,11 @@ void AnalogIn::adccallback(ADCDriver *adcp)
             sample_sum[index][j] += *buffer;
 
 #if HAL_WITH_MCU_MONITORING
+#if defined(STM32U5)
+            if (index == 0 && j == mcu_vrefint_index) {
+#else
             if (j == (num_grp_channels-1) && index == 2) {
+#endif
                 // record min/max for MCU Vcc
                 if (min_vrefint == 0 ||
                     min_vrefint > *buffer) {
@@ -556,7 +567,19 @@ void AnalogIn::setup_adc(uint8_t index)
 #endif
 
     adcStart(adcp, NULL);
-#if HAL_WITH_MCU_MONITORING
+#if HAL_WITH_MCU_MONITORING && defined(STM32U5)
+    if (index == 0) {
+        for (uint8_t i = 0; i < ADC_GRP1_NUM_CHANNELS; i++) {
+            if (pin_config[i].analog_pin == ANALOG_VSENSE_PIN) {
+                mcu_vsense_index = i;
+            } else if (pin_config[i].analog_pin == ANALOG_VREFINT_PIN) {
+                mcu_vrefint_index = i;
+            }
+        }
+        adcSTM32EnableVREF(&ADCD1);
+        adcSTM32EnableTS(&ADCD1);
+    }
+#elif HAL_WITH_MCU_MONITORING
     if (index == 2) {
         adcSTM32EnableVREF(&ADCD3);
         adcSTM32EnableTS(&ADCD3);
@@ -680,7 +703,16 @@ void AnalogIn::read_adc(uint8_t index, uint32_t *val)
     memset(sample_sum[index], 0, sizeof(uint32_t) * num_grp_channels);
     sample_count[index] = 0;
 #if HAL_WITH_MCU_MONITORING
-    if (index == 2) {
+#if defined(STM32U5)
+    const bool mcu_monitor_group = (index == 0);
+    const uint8_t vsense_index = mcu_vsense_index;
+    const uint8_t vrefint_index = mcu_vrefint_index;
+#else
+    const bool mcu_monitor_group = (index == 2);
+    const uint8_t vsense_index = num_grp_channels - 2;
+    const uint8_t vrefint_index = num_grp_channels - 1;
+#endif
+    if (mcu_monitor_group) {
         // copy the min/max values of vrefint if we are reading ADC3
         if (_mcu_vrefint_min == 0 ||
             _mcu_vrefint_min > min_vrefint) {
@@ -694,8 +726,8 @@ void AnalogIn::read_adc(uint8_t index, uint32_t *val)
         min_vrefint = 0;
         max_vrefint = 0;
         // accumulate temperature and Vcc readings
-        _mcu_monitor_temperature_accum += val[num_grp_channels - 2];
-        _mcu_monitor_voltage_accum += val[num_grp_channels - 1];
+        _mcu_monitor_temperature_accum += val[vsense_index];
+        _mcu_monitor_voltage_accum += val[vrefint_index];
         _mcu_monitor_sample_count++;
     }
 #endif
@@ -793,6 +825,27 @@ void AnalogIn::_timer_tick(void)
         hal.scheduler->is_system_initialized()) {
         last_mcu_temp_us = now;
 
+#if defined(STM32U5)
+        // factory calibration, 14 bit at VDDA = 3.0V (addresses from ST's
+        // LL ADC driver); our samples are 12 bit. VREFINT_CAL is at an odd
+        // address, so it is read bytewise
+        const volatile uint8_t *vrefint_cal = (const volatile uint8_t *)0x0BFA07A5;
+        const float VREFINT_CAL = vrefint_cal[0] | (vrefint_cal[1] << 8);
+        const float TS_CAL1 = *(const volatile uint16_t *)0x0BFA0710; // 30C
+        const float TS_CAL2 = *(const volatile uint16_t *)0x0BFA0742; // 130C
+
+        _mcu_voltage = 3.0 * VREFINT_CAL / (4 * float(_mcu_monitor_voltage_accum/_mcu_monitor_sample_count) + 0.001);
+        // the sensor's calibration points are at VDDA = 3.0V
+        const float vsense = 4 * float(_mcu_monitor_temperature_accum/_mcu_monitor_sample_count) * _mcu_voltage / 3.0;
+        _mcu_temperature = ((130 - 30) / (TS_CAL2 - TS_CAL1)) * (vsense - TS_CAL1) + 30;
+        _mcu_monitor_voltage_accum = 0;
+        _mcu_monitor_temperature_accum = 0;
+        _mcu_monitor_sample_count = 0;
+
+        // note min/max swap due to inversion
+        _mcu_voltage_min = 3.0 * VREFINT_CAL / (4 * float(_mcu_vrefint_max) + 0.001);
+        _mcu_voltage_max = 3.0 * VREFINT_CAL / (4 * float(_mcu_vrefint_min) + 0.001);
+#else
         // factory calibration values
         const float TS_CAL1 = *(const volatile uint16_t *)0x1FF1E820;
         const float TS_CAL2 = *(const volatile uint16_t *)0x1FF1E840;
@@ -807,6 +860,7 @@ void AnalogIn::_timer_tick(void)
         // note min/max swap due to inversion
         _mcu_voltage_min = 3.3 * VREFINT_CAL / float(_mcu_vrefint_max+0.001);
         _mcu_voltage_max = 3.3 * VREFINT_CAL / float(_mcu_vrefint_min+0.001);
+#endif
         
         // reset min and max
         _mcu_vrefint_max = 0;

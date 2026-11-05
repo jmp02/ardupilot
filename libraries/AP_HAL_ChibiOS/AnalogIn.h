@@ -27,7 +27,7 @@
 #define HAL_MAX_ANALOG_IN_CHANNELS 20
 
 #ifndef HAL_NUM_ANALOG_INPUTS
-#if defined(HAL_ANALOG3_PINS) || HAL_WITH_MCU_MONITORING
+#if defined(HAL_ANALOG3_PINS) || (HAL_WITH_MCU_MONITORING && !defined(STM32U5))
 #define HAL_NUM_ANALOG_INPUTS 3
 #elif defined(HAL_ANALOG2_PINS)
 #define HAL_NUM_ANALOG_INPUTS 2
@@ -119,7 +119,7 @@ private:
 #ifdef HAL_ANALOG2_PINS
     static const pin_info pin_config_2[];
 #endif
-#if defined(HAL_ANALOG3_PINS) || HAL_WITH_MCU_MONITORING
+#if defined(HAL_ANALOG3_PINS) || (HAL_WITH_MCU_MONITORING && !defined(STM32U5))
     static const pin_info pin_config_3[];
 #endif
 
