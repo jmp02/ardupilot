@@ -30,6 +30,9 @@ mcu = {
     'DEFINES' : {
         'STM32U5' : '1',
         'HAL_WITH_MCU_MONITORING' : '1',
+        # RCOutput's timer DMA has no GPDMA backend yet: plain PWM only
+        'HAL_DSHOT_ENABLED' : '0',
+        'HAL_SERIAL_ESC_COMM_ENABLED' : '0',
     },
 
     # Cortex-M33 with single precision FPU
