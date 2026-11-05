@@ -36,7 +36,7 @@ mcu = {
     'CPU_FLAGS' : '-mcpu=cortex-m33 -mfpu=fpv5-sp-d16 -mfloat-abi=hard',
 }
 
-# no DMA map: GPDMA1 channels are allocated dynamically (not supported by ArduPilot yet)
+# no DMA map: GPDMA1 channels are allocated at run time from masks (dma_resolver.py GPDMA mode)
 DMA_Map = None
 
 # max pin package is 144 (STM32U585ZITxQ)

@@ -714,6 +714,19 @@ class ChibiOSHWDef(hwdef.HWDef):
         )
         return any(p in platform_mk for p in i2cv4_platforms)
 
+    def mcu_uses_gpdma(self):
+        '''return True if this MCU's DMA controller is a GPDMA (ChibiOS DMA3v1
+        LLD), whose channels are allocated at run time from a mask'''
+        lib = self.get_mcu_lib(self.mcu_type)
+        platform_mk = getattr(lib, 'build', {}).get('CHIBIOS_PLATFORM_MK', '')
+        # ChibiOS platform directories whose platform.mk pulls in LLD/DMA3v1
+        gpdma_platforms = (
+            'STM32U3xx/',
+            'STM32U5xx/',
+            'STM32H5xx/',
+        )
+        return any(p in platform_mk for p in gpdma_platforms)
+
     def get_ram_reserve_start(self):
         '''get amount of memory to reserve for bootloader comms and the address if non-zero'''
         ram_reserve_start = self.get_config('RAM_RESERVE_START', default=0, type=int)
@@ -2669,6 +2682,7 @@ Please run: Tools/scripts/build_bootloaders.py %s
                 dma_priority=self.get_config('DMA_PRIORITY', default='TIM* SPI*', spaces=True),
                 dma_noshare=self.dma_noshare,
                 quiet=self.quiet,
+                gpdma=self.mcu_uses_gpdma(),
             )
 
         if not self.is_bootloader_fw():
@@ -2787,6 +2801,9 @@ Please run: Tools/scripts/build_bootloaders.py %s
         self.shared_up = []
         done = set()
         prefixes = ['SPI', 'USART', 'UART', 'I2C']
+        if self.mcu_uses_gpdma():
+            # LPUART1 is on the GPDMA like any other UART
+            prefixes.append('LPUART')
         periph_pins = self.allpins[:]
         for alt in self.altmap.keys():
             for p in self.altmap[alt].keys():

@@ -294,11 +294,51 @@ def forbidden_list(p, peripheral_list):
     return ret
 
 
+def write_dma3_header(f, peripheral_list, dma_exclude=[], quiet=False):
+    '''write out the DMA header for MCUs with a GPDMA (ChibiOS DMA3). Its
+    drivers allocate channels at run time from a channel mask, so there is
+    no map to resolve and nothing is shared: only request lines and masks
+    are written'''
+    if not quiet:
+        print("Writing GPDMA config")
+    f.write("\n\n// auto-generated GPDMA configuration from dma_resolver.py\n")
+    f.write("// GPDMA channels are allocated by their drivers, never shared\n")
+    f.write("#define SHARED_DMA_MASK 0\n")
+    # UART and SPI take channels with the small FIFO, the 2D-capable
+    # channels are left for timers
+    f.write("#define STM32_UART_DMA3_CHANNELS STM32_DMA3_MASK_FIFO2\n")
+
+    f.write("\n\n// generated UART DMA configuration lines\n")
+    uarts = sorted(set(p[:-3] for p in peripheral_list
+                       if p.startswith(('USART', 'UART', 'LPUART')) and p[-3:] in ('_RX', '_TX')))
+    for key in uarts:
+        for d in ['RX', 'TX']:
+            f.write("#define STM32_%s_%s_DMA_CONFIG " % (key, d))
+            periph = key + '_' + d
+            if periph in peripheral_list and periph not in dma_exclude:
+                f.write("true, STM32_DMA_STREAM_ID_ANY, STM32_DMA3_REQ_%s\n" % periph)
+            else:
+                f.write("false, 0, 0\n")
+
+    # the SPI LLD always uses DMA
+    f.write("\n\n// generated SPI DMA configuration lines\n")
+    spis = sorted(set(p[:-3] for p in peripheral_list
+                      if p.startswith('SPI') and p[-3:] in ('_RX', '_TX')))
+    for key in spis:
+        f.write("#define STM32_SPI_%s_RX_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
+        f.write("#define STM32_SPI_%s_TX_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
+        f.write("#define STM32_SPI_%s_DMA_STREAMS STM32_DMA_STREAM_ID_ANY, STM32_DMA_STREAM_ID_ANY\n" % key)
+    return [], []
+
+
 def write_dma_header(f, peripheral_list, mcu_type, dma_exclude=[],
-                     dma_priority='', dma_noshare=[], quiet=False):
+                     dma_priority='', dma_noshare=[], quiet=False, gpdma=False):
     '''write out a DMA resolver header file'''
     global dma_map, have_DMAMUX, has_bdshot
     timer_ch_periph = []
+
+    if gpdma:
+        return write_dma3_header(f, peripheral_list, dma_exclude=dma_exclude, quiet=quiet)
 
     if mcu_type.startswith('STM32H7'):
         global DMAMUX2_peripherals
