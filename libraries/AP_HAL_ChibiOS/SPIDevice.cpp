@@ -30,8 +30,24 @@
 using namespace ChibiOS;
 extern const AP_HAL::HAL& hal;
 
+// the H7's SPI (also on U5) has CFG1/CFG2 registers: the mode in CFG2,
+// clock divider and frame size in CFG1
+#if defined(STM32H7) || defined(STM32U5)
+#define HAL_SPI_CFG_REGS 1
+#else
+#define HAL_SPI_CFG_REGS 0
+#endif
+
+// the thread reference a transfer completion wakes: ChibiOS's v2 SPI
+// driver model (SPIv4 on U5) renamed it
+#if defined(HAL_LLD_SELECT_SPI_V2)
+#define SPI_SYNC_THREAD(spip) ((spip)->sync_transfer)
+#else
+#define SPI_SYNC_THREAD(spip) ((spip)->thread)
+#endif
+
 // SPI mode numbers
-#if defined(STM32H7)
+#if HAL_SPI_CFG_REGS
 #define SPIDEV_MODE0    0
 #define SPIDEV_MODE1    SPI_CFG2_CPHA
 #define SPIDEV_MODE2    SPI_CFG2_CPOL
@@ -40,9 +56,16 @@ extern const AP_HAL::HAL& hal;
 #define SPI1_CLOCK  STM32_SPI1CLK
 #define SPI2_CLOCK  STM32_SPI2CLK
 #define SPI3_CLOCK  STM32_SPI3CLK
+#if defined(STM32_SPI4CLK)
 #define SPI4_CLOCK  STM32_SPI4CLK
 #define SPI5_CLOCK  STM32_SPI5CLK
 #define SPI6_CLOCK  STM32_SPI6CLK
+#else
+// U5: SPI1-3 only
+#define SPI4_CLOCK  0
+#define SPI5_CLOCK  0
+#define SPI6_CLOCK  0
+#endif
 
 #else // F4 and F7
 #define SPIDEV_MODE0    0
@@ -149,7 +172,7 @@ void SPIDevice::get_crashdump_config(bool high_speed, uint32_t &config1,
                                      uint32_t &config2) const
 {
     const uint32_t frequency_config = high_speed ? freq_flag_high : freq_flag_low;
-#if defined(STM32H7)
+#if HAL_SPI_CFG_REGS
     config1 = frequency_config;
     config2 = device_desc.mode;
 #else
@@ -229,7 +252,7 @@ bool SPIDevice::do_transfer(const uint8_t *send, uint8_t *recv, uint32_t len)
     // expect this timeout to trigger unless there is a severe MCU
     // error
     const uint32_t timeout_us = 20000U + len * 32U;
-    msg_t msg = osalThreadSuspendTimeoutS(&spi_devices[device_desc.bus].driver->thread, TIME_US2I(timeout_us));
+    msg_t msg = osalThreadSuspendTimeoutS(&SPI_SYNC_THREAD(spi_devices[device_desc.bus].driver), TIME_US2I(timeout_us));
     osalSysUnlock();
     if (msg == MSG_TIMEOUT) {
         ret = false;
@@ -257,7 +280,7 @@ bool SPIDevice::clock_pulse(uint32_t n)
         acquire_bus(true, true);
         osalSysLock();
         spiStartIgnoreI(spi_devices[device_desc.bus].driver, n);
-        msg = osalThreadSuspendTimeoutS(&spi_devices[device_desc.bus].driver->thread, TIME_US2I(timeout_us));
+        msg = osalThreadSuspendTimeoutS(&SPI_SYNC_THREAD(spi_devices[device_desc.bus].driver), TIME_US2I(timeout_us));
         osalSysUnlock();
         if (msg == MSG_TIMEOUT) {
             spiAbort(spi_devices[device_desc.bus].driver);
@@ -270,7 +293,7 @@ bool SPIDevice::clock_pulse(uint32_t n)
         }
         osalSysLock();
         spiStartIgnoreI(spi_devices[device_desc.bus].driver, n);
-        msg = osalThreadSuspendTimeoutS(&spi_devices[device_desc.bus].driver->thread, TIME_US2I(timeout_us));
+        msg = osalThreadSuspendTimeoutS(&SPI_SYNC_THREAD(spi_devices[device_desc.bus].driver), TIME_US2I(timeout_us));
         osalSysUnlock();
         if (msg == MSG_TIMEOUT) {
             spiAbort(spi_devices[device_desc.bus].driver);
@@ -296,7 +319,7 @@ uint32_t SPIDevice::derive_freq_flag_bus(uint8_t busid, uint32_t _frequency)
     // assuming the bitrate bits are consecutive in the CR1 register,
     // we can just multiply by BR_0 to get the right bits for the desired
     // scaling
-#if defined(STM32H7)
+#if HAL_SPI_CFG_REGS
     return (i * SPI_CFG1_MBR_0) | SPI_CFG1_DSIZE_VALUE(7); // 8 bit transfers
 #else
     return i * SPI_CR1_BR_0;
@@ -484,10 +507,17 @@ bool SPIDevice::acquire_bus(bool set, bool skip_cs)
         spiAcquireBus(spi_devices[device_desc.bus].driver);              /* Acquire ownership of the bus.    */
         bus.spicfg.ssport = PAL_PORT(device_desc.pal_line);
         bus.spicfg.sspad = PAL_PAD(device_desc.pal_line);
+#if defined(HAL_LLD_SELECT_SPI_V2)
+        bus.spicfg.data_cb = nullptr;
+        bus.spicfg.error_cb = nullptr;
+#else
         bus.spicfg.end_cb = nullptr;
-#if defined(STM32H7)
+#endif
+#if HAL_SPI_CFG_REGS
         bus.spicfg.cfg1 = freq_flag;
         bus.spicfg.cfg2 = device_desc.mode;
+#endif
+#if defined(STM32H7)
         if (bus.spicfg.dummytx == nullptr) {
             bus.spicfg.dummytx = (uint32_t *)malloc_dma(4);
             memset(bus.spicfg.dummytx, 0xFF, 4);
@@ -495,7 +525,7 @@ bool SPIDevice::acquire_bus(bool set, bool skip_cs)
         if (bus.spicfg.dummyrx == nullptr) {
             bus.spicfg.dummyrx = (uint32_t *)malloc_dma(4);
         }
-#else
+#elif !HAL_SPI_CFG_REGS
         bus.spicfg.cr1 = (uint16_t)(freq_flag | device_desc.mode);
         bus.spicfg.cr2 = 0;
 #endif
@@ -606,7 +636,7 @@ void SPIDevice::test_clock_freq(void)
         SPIConfig spicfg {};
         const uint32_t target_freq = 2000000UL;
         // use a clock divisor of 256 for maximum resolution
-#if defined(STM32H7)
+#if HAL_SPI_CFG_REGS
         spicfg.cfg1 = derive_freq_flag_bus(spi_devices[i].busid, target_freq);
 #else
         spicfg.cr1 = derive_freq_flag_bus(spi_devices[i].busid, target_freq);
@@ -616,7 +646,7 @@ void SPIDevice::test_clock_freq(void)
         uint32_t t0 = AP_HAL::micros();
         spiStartExchange(spi_devices[i].driver, len, buf1, buf2);
         chSysLock();
-        msg_t msg = osalThreadSuspendTimeoutS(&spi_devices[i].driver->thread, chTimeMS2I(100));
+        msg_t msg = osalThreadSuspendTimeoutS(&SPI_SYNC_THREAD(spi_devices[i].driver), chTimeMS2I(100));
         chSysUnlock();
         if (msg == MSG_TIMEOUT) {
             spiAbort(spi_devices[i].driver);
