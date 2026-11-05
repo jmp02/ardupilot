@@ -65,11 +65,25 @@
 #define STM32_CFG_LPUART1_SEL               RCC_CCIPR3_LPUART1SEL_PCLK3
 
 /*
- * PG2-PG15 run from VDDIO2 and stay isolated until it is declared valid.
- * Boards without anything on port G can override this with 0.
+ * ADC1 (the ADCv7 driver) runs from HSE when there is one: 16 MHz, inside
+ * ADC1's limit without the common prescaler; else from MSIK (4 MHz).
+ */
+#if STM32_CFG_HSE_ENABLE
+#define STM32_CFG_ADCDAC_SEL                RCC_CCIPR3_ADCDACSEL_HSE
+#else
+#define STM32_CFG_ADCDAC_SEL                RCC_CCIPR3_ADCDACSEL_MSIK
+#endif
+#ifndef STM32_ADC_USE_ADC1
+#define STM32_ADC_USE_ADC1                  TRUE
+#endif
+
+/*
+ * PG2-PG15 run from VDDIO2 and stay isolated until it is declared valid,
+ * and the ADC needs VDDA declared valid. Boards without anything on port G
+ * or analog inputs can override this.
  */
 #ifndef STM32_PWR_SVMCR
-#define STM32_PWR_SVMCR                     PWR_SVMCR_IO2SV
+#define STM32_PWR_SVMCR                     (PWR_SVMCR_IO2SV | PWR_SVMCR_ASV)
 #endif
 
 /*

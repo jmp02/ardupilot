@@ -570,6 +570,9 @@ void AnalogIn::setup_adc(uint8_t index)
 #if defined(ADC_CFGR_RES_16BITS)
     // use 16 bit resolution
     adcgrpcfg[index].cfgr = ADC_CFGR_CONT | ADC_CFGR_RES_16BITS;
+#elif defined(STM32U5)
+    // use 12 bit resolution (RES 1 on the U5's 14 bit ADC1)
+    adcgrpcfg[index].cfgr = ADC_CFGR1_CONT | ADC_CFGR1_RES_0;
 #elif defined(ADC_CFGR_RES_12BITS)
     // use 12 bit resolution
     adcgrpcfg[index].cfgr = ADC_CFGR_CONT | ADC_CFGR_RES_12BITS;
@@ -588,9 +591,14 @@ void AnalogIn::setup_adc(uint8_t index)
     for (uint8_t i=0; i<num_grp_channels; i++) {
         uint8_t chan = get_pin_channel(index, i);
         // setup cycles per sample for the channel
-#if defined(STM32H7)
+#if defined(STM32H7) || defined(STM32U5)
         adcgrpcfg[index].pcsel |= (1<<chan);
+#if defined(STM32U5)
+        // SMP code 6 = 391.5 cycles on the U5's ADC1 (the ADCv7 names are the U3's cycle counts)
+        adcgrpcfg[index].smpr[chan/10] |= 6U << (3*(chan%10));
+#else
         adcgrpcfg[index].smpr[chan/10] |= ADC_SMPR_SMP_384P5 << (3*(chan%10));
+#endif
         if (i < 4) {
             adcgrpcfg[index].sqr[0] |= chan << (6*(i+1));
         } else if (i < 9) {

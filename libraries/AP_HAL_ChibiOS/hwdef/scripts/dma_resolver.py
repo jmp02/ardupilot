@@ -329,6 +329,13 @@ def write_dma3_header(f, peripheral_list, dma_exclude=[], quiet=False):
         for key in i2cs:
             f.write("#define STM32_I2C_%s_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
 
+    # the ADC LLD always uses DMA
+    adcs = sorted(p for p in peripheral_list if p.startswith('ADC') and p[3:].isdigit())
+    if adcs:
+        f.write("\n\n// generated ADC DMA configuration lines\n")
+        for key in adcs:
+            f.write("#define STM32_ADC_%s_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
+
     # the SPI LLD always uses DMA
     f.write("\n\n// generated SPI DMA configuration lines\n")
     spis = sorted(set(p[:-3] for p in peripheral_list
