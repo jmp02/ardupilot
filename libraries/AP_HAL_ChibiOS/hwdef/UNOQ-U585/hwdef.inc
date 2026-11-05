@@ -26,7 +26,5 @@ PG6 QRB_RTS OUTPUT LOW
 PA13 JTMS-SWDIO SWD
 PA14 JTCK-SWCLK SWD
 
-# no DMA until ArduPilot has a GPDMA backend
+# all of SRAM1-3 is GPDMA-capable: no separate DMA heap
 define DMA_RESERVE_SIZE 0
-define HAL_UART_NODMA
-define AP_HAL_SHARED_DMA_ENABLED 0
