@@ -320,6 +320,15 @@ def write_dma3_header(f, peripheral_list, dma_exclude=[], quiet=False):
             else:
                 f.write("false, 0, 0\n")
 
+    # the I2Cv4 LLD takes one channel per bus for both directions, and its
+    # DMA is on or off for all buses
+    i2cs = sorted(p for p in peripheral_list if p.startswith('I2C') and p[3:].isdigit())
+    if i2cs and not any(p in dma_exclude for p in i2cs):
+        f.write("\n\n// generated I2C DMA configuration lines\n")
+        f.write("#define STM32_I2C_USE_DMA TRUE\n")
+        for key in i2cs:
+            f.write("#define STM32_I2C_%s_DMA3_CHANNEL STM32_DMA3_MASK_FIFO2\n" % key)
+
     # the SPI LLD always uses DMA
     f.write("\n\n// generated SPI DMA configuration lines\n")
     spis = sorted(set(p[:-3] for p in peripheral_list

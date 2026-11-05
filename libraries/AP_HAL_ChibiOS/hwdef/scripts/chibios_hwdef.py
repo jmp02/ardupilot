@@ -2074,7 +2074,18 @@ INCLUDE common.ld
             devlist.append('HAL_I2C%u_CONFIG' % n)
             sda_line = self.make_line('I2C%u_SDA' % n)
             scl_line = self.make_line('I2C%u_SCL' % n)
-            if uses_i2cv4:
+            if uses_i2cv4 and self.mcu_uses_gpdma():
+                # on a GPDMA the LLD allocates its channel from a mask:
+                # nothing for Shared_DMA to lock
+                f.write('''
+#if defined(STM32_I2C_I2C%u_DMA3_CHANNEL)
+#define HAL_I2C%u_CONFIG { &I2CD%u, %u, STM32_DMA_STREAM_ID_ANY, SHARED_DMA_NONE, %s, %s }
+#else
+#define HAL_I2C%u_CONFIG { &I2CD%u, %u, SHARED_DMA_NONE, SHARED_DMA_NONE, %s, %s }
+#endif
+'''
+                        % (n, n, n, n, scl_line, sda_line, n, n, n, scl_line, sda_line))
+            elif uses_i2cv4:
                 # I2Cv4 (STM32G0/G4/C0/U0/U3/U5/H5/L4+) uses a single DMA
                 # channel for both TX and RX on each I2C peripheral
                 f.write('''

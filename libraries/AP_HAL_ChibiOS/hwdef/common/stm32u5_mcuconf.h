@@ -161,7 +161,7 @@
 #define STM32_I2C_BUSY_TIMEOUT              50
 #define STM32_I2C_DMA_ERROR_HOOK(i2cp)      STM32_DMA_ERROR_HOOK(i2cp)
 #define STM32_I2C_ISR_LIMIT                 6
-// interrupt-driven I2C until ArduPilot has a GPDMA backend
+// interrupt-driven I2C unless the hwdef gives every I2C bus DMA (dma_resolver.py GPDMA mode)
 #ifndef STM32_I2C_USE_DMA
 #define STM32_I2C_USE_DMA                   FALSE
 #endif
