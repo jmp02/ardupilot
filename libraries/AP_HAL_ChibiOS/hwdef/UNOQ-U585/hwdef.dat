@@ -4,6 +4,13 @@
 
 include hwdef.inc
 
+# SERIAL1 = USART1 on the header's D1 (PB6, TX) / D0 (PB7, RX), the only free UART on the header: RC input
+# (an ELRS receiver: CRSF at 420000 with telemetry back on TX). The bootloader keeps LPUART1 alone
+SERIAL_ORDER LPUART1 USART1
+PB6 USART1_TX USART1
+PB7 USART1_RX USART1
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_RCIN
+
 # app after the bootloader's 4 x 8k pages
 FLASH_RESERVE_START_KB 32
 
