@@ -4,12 +4,16 @@
 
 include hwdef.inc
 
-# SERIAL1 = USART1 on the header's D1 (PB6, TX) / D0 (PB7, RX), the only free UART on the header: RC input
-# (an ELRS receiver: CRSF at 420000 with telemetry back on TX). The bootloader keeps LPUART1 alone
-SERIAL_ORDER LPUART1 USART1
+# SERIAL1 = USART1 on the header's D1 (PB6, TX) / D0 (PB7, RX): RC input (an ELRS receiver: CRSF at 420000 with
+# telemetry back on TX). SERIAL2 = USART3 on A3 (PA7, TX) / A1 (PA5, RX): GPS. These are the only two UARTs the header
+# reaches besides LPUART1 (the Linux link). The bootloader keeps LPUART1 alone
+SERIAL_ORDER LPUART1 USART1 USART3
 PB6 USART1_TX USART1
 PB7 USART1_RX USART1
+PA7 USART3_TX USART3
+PA5 USART3_RX USART3
 define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_RCIN
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_GPS
 
 # app after the bootloader's 4 x 8k pages
 FLASH_RESERVE_START_KB 32
@@ -31,11 +35,17 @@ define AP_NOTIFY_GPIO_LED_RGB_GREEN_PIN 91
 define AP_NOTIFY_GPIO_LED_RGB_BLUE_PIN 92
 
 # I2C2 on the header's SDA/SCL pins (D20 = PB11, D21 = PB10): the bench breakout (Adafruit 4517, LSM6DSOX +
-# LIS3MDL, pull-ups on the breakout), later the shield's baros and compass
-I2C_ORDER I2C2
+# LIS3MDL, pull-ups on the breakout) and the bench baro, later the shield's baros and compass. Internal (bus 0).
+# I2C4 on the Qwiic connector (PD12 SCL, PD13 SDA, 3.3 V): external (bus 1), the GPS module's compass
+I2C_ORDER I2C2 I2C4
 PB10 I2C2_SCL I2C2
 PB11 I2C2_SDA I2C2
+PD12 I2C4_SCL I2C4
+PD13 I2C4_SDA I2C4
 define HAL_I2C_INTERNAL_MASK 1
+
+# probe all external I2C compass types on the external bus (the GPS module's compass on Qwiic)
+define AP_COMPASS_PROBING_ENABLED 1
 
 # 400kHz: the IMU's FIFO needs it (AP_InertialSensor_ASM330 on I2C: 1.67kHz gyro + 833Hz accel)
 define HAL_I2C_MAX_CLOCK 400000
@@ -44,37 +54,44 @@ define HAL_I2C_MAX_CLOCK 400000
 # X arrow printed on it: the chip's Z points up, so roll 180
 IMU ASM330 I2C:0:0x6A ROTATION_ROLL_180
 
-# SPI2 on the header (D13 SCK = PB13, D12 MISO = PB14, D11 MOSI = PB15), CS on D10 = PB9: the SPI LSM6DSV16X breakout
-# (docs/hardware/shield-sensors.md "Buy now"), probed at boot; absent until it is wired, then found with no change here
+# SPI2 on the header (D13 SCK = PB13, D12 MISO = PB14, D11 MOSI = PB15), CS on D10 = PB9: a microSD breakout
+# (Adafruit) for logs, parameters' backups and terrain. SPI2's base is 80 MHz: 400 kHz gives 625 kHz (the lowest
+# divider, /128) for the card's start-up, 12 MHz gives 10 MHz (jumper wires; 25 MHz would give 20 MHz)
 PB13 SPI2_SCK SPI2
 PB14 SPI2_MISO SPI2
 PB15 SPI2_MOSI SPI2
-PB9 IMU2_CS CS
-SPIDEV lsm6dsv SPI2 DEVID1 IMU2_CS MODE3 2*MHZ 8*MHZ
-IMU LSM6DSV SPI:lsm6dsv ROTATION_NONE
+PB9 SDCARD_CS CS
+SPIDEV sdcard SPI2 DEVID1 SDCARD_CS MODE0 400*KHZ 12*MHZ
+define HAL_OS_FATFS_IO 1
 
 # bench compass: LIS3MDL at 0x1C (ADM open). Its axes are the IMU's (ArduPilot's compass calibration:
 # "internal bad orientation: 8", ROLL_180, with ROTATION_NONE)
 COMPASS LIS3MDL I2C:0:0x1C false ROTATION_ROLL_180
 
-# bench PWM outputs (plain PWM: no timer DMA on the U5 yet, so no DShot). 1-3 are the shield plan's motor pins
-# (docs/hardware/shield-sensors.md); 4 stands in for its D10, the bench SPI CS here; 5 is a spare for servo tests
+# motor outputs (PWM or DShot, M7/M10): M1 front right D3, M2 rear left D6, M3 front left D9, M4 rear right D8.
+# 1-3 are the shield plan's motor pins (docs/hardware/shield-sensors.md); 4 stands in for its D10, the bench SD card
+# CS here. The spare output 5 on A3 gave way to the GPS UART
 PB0 TIM3_CH3 TIM3 PWM(1) GPIO(50)
 PB1 TIM3_CH4 TIM3 PWM(2) GPIO(51)
 PB8 TIM4_CH3 TIM4 PWM(3) GPIO(52)
 PB4 TIM3_CH1 TIM3 PWM(4) GPIO(53)
-PA7 TIM3_CH2 TIM3 PWM(5) GPIO(54)
 
-# no baro on the bench breakout
+# bench baro: a BMP280 module (AHT20 + BMP280 board) on I2C2, at 0x76 or 0x77 depending on its SDO strap.
+# Boots without one until it is fitted; the arming checks still require it
+BARO BMP280 I2C:0:0x76
+BARO BMP280 I2C:0:0x77
 define HAL_BARO_ALLOW_INIT_NO_BARO
 
 # keep SWD enabled after boot (BRD_OPTIONS bit 3, DEBUG_ENABLE): on the UNO Q the SWD lines are board traces to the QRB2210,
 # not exposed pads, and its SWD is the only debug and recovery path
 define HAL_BRD_OPTIONS_DEFAULT (BOARD_OPTION_WATCHDOG | BOARD_OPTION_DEBUG_ENABLE)
 
-# A0 = PA4 (ADC1_IN9) as the battery voltage input; nothing on it on the bench. BATT_MONITOR stays 0 (default)
+# battery sensing from a Holybro PM06 (its outputs are scaled for a 3.3 V ADC): A0 = PA4 (ADC1_IN9) voltage,
+# A4 = PC1 (ADC1_IN2) current. BATT_MONITOR stays 0 (default) until the PM06 is wired; then 4 (voltage and current)
 PA4 BATT_VOLTAGE_SENS ADC1 SCALE(1)
+PC1 BATT_CURRENT_SENS ADC1 SCALE(1)
 define HAL_BATT_VOLT_PIN 9
-# no divider on the bench
-define HAL_BATT_VOLT_SCALE 1.0
+define HAL_BATT_CURR_PIN 2
+define HAL_BATT_VOLT_SCALE 18.182
+define HAL_BATT_CURR_SCALE 36.364
 
