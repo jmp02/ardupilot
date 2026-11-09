@@ -2039,10 +2039,12 @@ void RCOutput::dma_cancel(pwm_group& group)
     dmaStreamDisable(group.dma);
 #endif
 #ifdef HAL_WITH_BIDIR_DSHOT
+#if !defined(STM32_DMA3_PRESENT)
     if (group.ic_dma_enabled() && !group.has_shared_ic_up_dma()) {
         dmaStreamDisable(group.bdshot.ic_dma[group.bdshot.curr_telem_chan]);
     }
-#if STM32_DMA_SUPPORTS_DMAMUX
+#endif
+#if !defined(STM32_DMA3_PRESENT) && STM32_DMA_SUPPORTS_DMAMUX
     // the DMA request source has been switched by the receive path, so reinstate the correct one
     if (group.dshot_state == DshotState::RECV_START && group.has_shared_ic_up_dma()) {
         dmaSetRequestSource(group.dma, group.dma_up_channel);

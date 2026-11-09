@@ -51,10 +51,6 @@ typedef int32_t dmar_int_t;
 #error "DShot, serial LEDs and ESC passthrough need RCOutput timer DMA"
 #endif
 
-#if defined(STM32_DMA3_PRESENT) && defined(HAL_WITH_BIDIR_DSHOT)
-#error "bidirectional DShot has no GPDMA support yet"
-#endif
-
 #ifdef AP_RCOUT_USE_32BIT_TIME
 typedef uint32_t rcout_timer_t;
 #define rcout_micros() AP_HAL::micros()
@@ -440,7 +436,12 @@ private:
         struct {
             uint16_t erpm[4];
             volatile bool enabled;
+#if defined(STM32_DMA3_PRESENT)
+            // GPDMA: capture always shares the group's channel, these stay null
+            const stm32_dma3_channel_t *ic_dma[4];
+#else
             const stm32_dma_stream_t *ic_dma[4];
+#endif
             uint16_t dma_tx_size; // save tx value from last read
             Shared_DMA *ic_dma_handle[4];
             uint8_t telem_tim_ch[4];

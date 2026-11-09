@@ -355,6 +355,15 @@ def write_dma3_header(f, peripheral_list, dma_exclude=[], quiet=False):
         for key in tims:
             f.write("#define STM32_TIM_%s_DMA_STREAM STM32_DMA_STREAM_ID_ANY\n" % key)
             f.write("#define STM32_TIM_%s_DMA_CHAN STM32_DMA3_REQ_%sD\n" % (key, key))
+    # bidirectional DShot capture: the timer's channel shares the TIMx_UP
+    # channel (same stream id), only its request line TIMx_CCy differs
+    tim_chs = sorted(p for p in peripheral_list
+                     if p.startswith('TIM') and '_CH' in p and p[-1].isdigit()
+                     and p not in dma_exclude and p.split('_')[0] + '_UP' in tims)
+    for key in tim_chs:
+        (tim, ch) = key.split('_CH')
+        f.write("#define STM32_TIM_%s_DMA_STREAM STM32_DMA_STREAM_ID_ANY\n" % key)
+        f.write("#define STM32_TIM_%s_DMA_CHAN STM32_DMA3_REQ_%s_CC%s\n" % (key, tim, ch))
     return [], []
 
 

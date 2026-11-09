@@ -75,6 +75,20 @@ void RCOutput::set_bidir_dshot_mask(uint32_t mask)
 #define TOGGLE_PIN_CH_DEBUG(pin, channel) do {} while (0)
 #endif
 
+#if defined(STM32_DMA3_PRESENT)
+/*
+  GPDMA (DMA3) setup for the telemetry capture: the group's own channel reads
+  the capture register of the telemetry channel, one word per TIMx_CCy request
+ */
+#define BDSHOT_DMA3_IC_CR (STM32_DMA3_CCR_PRIO(3) | STM32_DMA3_CCR_LAP_MEM | STM32_DMA3_CCR_TCIE | \
+                           STM32_DMA3_CCR_DTEIE | STM32_DMA3_CCR_USEIE)
+#define BDSHOT_DMA3_IC_TR1 (STM32_DMA3_CTR1_SAP_PER | STM32_DMA3_CTR1_SDW_WORD | \
+                            STM32_DMA3_CTR1_DAP_MEM | STM32_DMA3_CTR1_DDW_WORD | STM32_DMA3_CTR1_DINC)
+#define BDSHOT_DMA_ERROR_FLAGS (STM32_DMA3_CSR_DTEF | STM32_DMA3_CSR_USEF | STM32_DMA3_CSR_ULEF)
+#else
+#define BDSHOT_DMA_ERROR_FLAGS (STM32_DMA_ISR_TEIF | STM32_DMA_ISR_DMEIF)
+#endif
+
 bool RCOutput::bdshot_setup_group_ic_DMA(pwm_group &group)
 {
     // check if already allocated
@@ -101,6 +115,11 @@ bool RCOutput::bdshot_setup_group_ic_DMA(pwm_group &group)
             if (group.dma_ch[i].stream_id == group.dma_up_stream_id) {
                 group.bdshot.ic_dma_handle[i] = group.dma_handle;
             } else {
+#if defined(STM32_DMA3_PRESENT)
+                // GPDMA: the request line is set per transfer, so capture always
+                // shares the group's channel (the resolver gives both the same id)
+                goto ic_dma_fail;
+#endif
                 group.bdshot.ic_dma_handle[i] = NEW_NOTHROW Shared_DMA(group.dma_ch[i].stream_id, SHARED_DMA_NONE,
                                                 FUNCTOR_BIND_MEMBER(&RCOutput::bdshot_ic_dma_allocate, void, Shared_DMA *),
                                                 FUNCTOR_BIND_MEMBER(&RCOutput::bdshot_ic_dma_deallocate, void, Shared_DMA *));
@@ -164,6 +183,9 @@ bool RCOutput::bdshot_setup_group_ic_DMA(pwm_group &group)
             if (group.dma_ch[curr_chan].stream_id == group.dma_up_stream_id) {
                 group.bdshot.ic_dma_handle[i] = group.dma_handle;
             } else {
+#if defined(STM32_DMA3_PRESENT)
+                goto ic_dma_fail;
+#endif
                 // we can use the next channel
                 group.bdshot.ic_dma_handle[i] = NEW_NOTHROW Shared_DMA(group.dma_ch[curr_chan].stream_id, SHARED_DMA_NONE,
                                             FUNCTOR_BIND_MEMBER(&RCOutput::bdshot_ic_dma_allocate, void, Shared_DMA *),
@@ -202,13 +224,14 @@ ic_dma_fail:
  */
 void RCOutput::bdshot_ic_dma_allocate(Shared_DMA *ctx)
 {
+#if !defined(STM32_DMA3_PRESENT)
     for (uint8_t i = 0; i < NUM_GROUPS; i++ ) {
         pwm_group &group = pwm_group_list[i];
         for (uint8_t icuch = 0; icuch < 4; icuch++) {
             if (group.bdshot.ic_dma_handle[icuch] == ctx && group.bdshot.ic_dma[icuch] == nullptr) {
                 chSysLock();
                 group.bdshot.ic_dma[icuch] = dmaStreamAllocI(group.dma_ch[icuch].stream_id, 10, bdshot_dma_ic_irq_callback, &group);
-#if STM32_DMA_SUPPORTS_DMAMUX
+#if !defined(STM32_DMA3_PRESENT) && STM32_DMA_SUPPORTS_DMAMUX
                 if (group.bdshot.ic_dma[icuch]) {
                     dmaSetRequestSource(group.bdshot.ic_dma[icuch], group.dma_ch[icuch].channel);
                 }
@@ -217,6 +240,7 @@ void RCOutput::bdshot_ic_dma_allocate(Shared_DMA *ctx)
             }
         }
     }
+#endif // !STM32_DMA3_PRESENT
 }
 
 /*
@@ -224,6 +248,7 @@ void RCOutput::bdshot_ic_dma_allocate(Shared_DMA *ctx)
  */
 void RCOutput::bdshot_ic_dma_deallocate(Shared_DMA *ctx)
 {
+#if !defined(STM32_DMA3_PRESENT)
     for (uint8_t i = 0; i < NUM_GROUPS; i++ ) {
         pwm_group &group = pwm_group_list[i];
         for (uint8_t icuch = 0; icuch < 4; icuch++) {
@@ -240,6 +265,7 @@ void RCOutput::bdshot_ic_dma_deallocate(Shared_DMA *ctx)
             chSysUnlock();
         }
     }
+#endif // !STM32_DMA3_PRESENT
 }
 
 // setup bdshot for sending and receiving the next pulse
@@ -348,8 +374,23 @@ void RCOutput::bdshot_receive_pulses_DMAR(pwm_group* group)
     // Initialise ICU channels
     bdshot_config_icu_dshot(group->pwm_drv->tim, curr_ch, group->bdshot.telem_tim_ch[curr_ch]);
 
+#if defined(STM32_DMA3_PRESENT)
+    // GPDMA: the group's channel reads the capture register itself (no DMAR
+    // burst, so DCR/DBSS are left alone), requested by the channel's CCy line
+    dma3ChannelSetupTransfer(group->dma, BDSHOT_DMA3_IC_CR, BDSHOT_DMA3_IC_TR1,
+                             STM32_DMA3_CTR2_REQSEL(group->dma_ch[curr_ch].channel),
+                             GCR_TELEMETRY_BIT_LEN * sizeof(dmar_uint_t),
+                             &(group->pwm_drv->tim->CCR[group->bdshot.telem_tim_ch[curr_ch]]),
+                             group->dma_buffer, 0U);
+
+    // Start Timer
+    group->pwm_drv->tim->EGR |= STM32_TIM_EGR_UG;
+    group->pwm_drv->tim->SR = 0;
+    group->pwm_drv->tim->CR1 = TIM_CR1_ARPE | STM32_TIM_CR1_URS | STM32_TIM_CR1_UDIS | STM32_TIM_CR1_CEN;
+    dma3ChannelEnable(group->dma);
+#else
     // do a little DMA dance when sharing with UP
-#if STM32_DMA_SUPPORTS_DMAMUX
+#if !defined(STM32_DMA3_PRESENT) && STM32_DMA_SUPPORTS_DMAMUX
     if (group->has_shared_ic_up_dma()) {
         dmaSetRequestSource(group->dma, group->dma_ch[curr_ch].channel);
     }
@@ -382,6 +423,7 @@ void RCOutput::bdshot_receive_pulses_DMAR(pwm_group* group)
     group->pwm_drv->tim->SR = 0;
     group->pwm_drv->tim->CR1 = TIM_CR1_ARPE | STM32_TIM_CR1_URS | STM32_TIM_CR1_UDIS | STM32_TIM_CR1_CEN;
     dmaStreamEnable(ic_dma);
+#endif // STM32_DMA3_PRESENT
 }
 
 
@@ -503,6 +545,14 @@ __RAMFUNC__ void RCOutput::bdshot_finish_dshot_gcr_transaction(virtual_timer_t* 
         return;
     }
 
+#if defined(STM32_DMA3_PRESENT)
+    // GPDMA: always the group's channel. BNDT counts bytes; read it before the
+    // channel reset (the ESC's reply ended well before this timeout)
+    const size_t dma3_left = dma3ChannelGetTransactionSize(group->dma) / sizeof(dmar_uint_t);
+    (void)dma3ChannelDisable(group->dma);
+    group->bdshot.dma_tx_size = MIN(uint16_t(GCR_TELEMETRY_BIT_LEN),
+        GCR_TELEMETRY_BIT_LEN - dma3_left);
+#else
     uint8_t curr_telem_chan = group->bdshot.curr_telem_chan;
 
     // the DMA buffer is either the regular outbound one because we are sharing UP and CH
@@ -514,6 +564,7 @@ __RAMFUNC__ void RCOutput::bdshot_finish_dshot_gcr_transaction(virtual_timer_t* 
     dmaStreamDisable(dma);
     group->bdshot.dma_tx_size = MIN(uint16_t(GCR_TELEMETRY_BIT_LEN),
         GCR_TELEMETRY_BIT_LEN - dmaStreamGetTransactionSize(dma));
+#endif // STM32_DMA3_PRESENT
 
     // flush / invalidate all the data we are going to read
     stm32_cacheBufferInvalidate(group->dma_buffer, ((sizeof(dmar_uint_t) * group->bdshot.dma_tx_size)+31)&~31);
@@ -529,7 +580,7 @@ __RAMFUNC__ void RCOutput::bdshot_finish_dshot_gcr_transaction(virtual_timer_t* 
 #endif
     // if using input capture DMA and sharing the UP and CH channels then clean up
     // by assigning the source back to UP
-#if STM32_DMA_SUPPORTS_DMAMUX
+#if !defined(STM32_DMA3_PRESENT) && STM32_DMA_SUPPORTS_DMAMUX
     if (group->has_shared_ic_up_dma()) {
         dmaSetRequestSource(group->dma, group->dma_up_channel);
     }
@@ -639,10 +690,15 @@ __RAMFUNC__ void RCOutput::dma_up_irq_callback(void *p, uint32_t flags)
     }
 
     // check nothing bad happened
-    if ((flags & (STM32_DMA_ISR_TEIF | STM32_DMA_ISR_DMEIF)) != 0) {
+    if ((flags & BDSHOT_DMA_ERROR_FLAGS) != 0) {
         INTERNAL_ERROR(AP_InternalError::error_t::dma_fail);
     }
+#if defined(STM32_DMA3_PRESENT)
+    // the block is complete: the channel is idle, this resets it and clears its flags
+    (void)dma3ChannelDisable(group->dma);
+#else
     dmaStreamDisable(group->dma);
+#endif
 
     if (soft_serial_waiting()) {
 #if HAL_SERIAL_ESC_COMM_ENABLED
@@ -680,7 +736,7 @@ __RAMFUNC__ void RCOutput::bdshot_dma_ic_irq_callback(void *p, uint32_t flags)
     chSysLockFromISR();
 
     // check nothing bad happened
-    if ((flags & (STM32_DMA_ISR_TEIF | STM32_DMA_ISR_DMEIF)) != 0) {
+    if ((flags & BDSHOT_DMA_ERROR_FLAGS) != 0) {
         INTERNAL_ERROR(AP_InternalError::error_t::dma_fail);
     }
 
