@@ -310,7 +310,9 @@ void RCOutput::bdshot_prepare_for_next_pulse(pwm_group& group)
             _bdshot.erpm_last_stats_ms[chan] = now;
         }
     } else if (group.dshot_state == DshotState::RECV_FAILED) {
-        _bdshot.erpm_errors[group.bdshot.curr_telem_chan]++;
+        // no reply at all: count it against the motor that was listened to (the finish
+        // has already moved curr_telem_chan on, and the index is the group's, not the motor's)
+        _bdshot.erpm_errors[group.chan[group.bdshot.prev_telem_chan]]++;
     }
 
     if (group.bdshot.enabled) {
